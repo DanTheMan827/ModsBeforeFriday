@@ -1,134 +1,109 @@
 import type { AdbIncomingSocketHandler, AdbServerClient } from "@yume-chan/adb";
-import {
-  MaybeConsumable,
-  ReadableStream,
-  ReadableWritablePair
-} from "@yume-chan/stream-extra";
+import { MaybeConsumable, ReadableStream, ReadableWritablePair } from "@yume-chan/stream-extra";
 
+/** WebSocket bridge endpoints. */
 export const bridgeWebsocketAddress = "ws://127.0.0.1:25037/bridge";
 export const bridgePingAddress = "http://127.0.0.1:25037/bridge/ping";
 
 /**
- * Checks if the bridge is running
- * @returns Whether the bridge is running
+ * Checks if the bridge is running by sending a GET request to the ping endpoint.
+ *
+ * @returns A promise that resolves to true if the bridge is running, false otherwise.
  */
 export async function checkForBridge(): Promise<boolean> {
-  // Ping the bridge to see if the bridge is running
   try {
-    const response = await fetch(bridgePingAddress, { method: "GET" });
-    if (response.ok) {
-      return true;
-    }
-  } catch (e) {
+    const response = await fetch(bridgePingAddress);
+    return response.ok;
+  } catch {
     return false;
   }
-
-  return false;
 }
 
 /**
- * Returns a promise that resolves after a given delay.
- * @param ms - Number of milliseconds to delay.
- */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * A generic Deferred class that encapsulates a Promise which can be resolved or rejected externally.
+ * A simple Deferred implementation to encapsulate an externally resolvable promise.
  */
 class Deferred<T> {
-  private promise: Promise<T>;
-  private resolveFn!: (value: T | PromiseLike<T>) => void;
-  private rejectFn!: (reason?: any) => void;
-  private state: "running" | "resolved" | "rejected" = "running";
+  public promise: Promise<T>;
+  private _resolve!: (value: T | PromiseLike<T>) => void;
+  private _reject!: (reason?: any) => void;
 
   constructor() {
     this.promise = new Promise<T>((resolve, reject) => {
-      this.resolveFn = resolve;
-      this.rejectFn = reject;
+      this._resolve = resolve;
+      this._reject = reject;
     });
   }
 
-  public getPromise(): Promise<T> {
-    return this.promise;
-  }
-
-  public getState(): "running" | "resolved" | "rejected" {
-    return this.state;
-  }
-
+  /** Resolves the deferred promise. */
   public resolve(value: T): void {
-    this.resolveFn(value);
-    this.state = "resolved";
+    this._resolve(value);
   }
 
+  /** Rejects the deferred promise. */
   public reject(reason?: any): void {
-    this.rejectFn(reason);
-    this.state = "rejected";
+    this._reject(reason);
   }
 }
 
-interface Socket extends ReadableWritablePair<Uint8Array, Uint8Array>{
+/**
+ * Interface representing a socket with readable and writable streams,
+ * along with connection details.
+ */
+interface Socket extends ReadableWritablePair<Uint8Array, Uint8Array> {
   extensions: string;
   protocol: string;
 }
 
 /**
- * Wraps a WebSocket connection into Readable and Writable streams.
+ * Wraps a WebSocket connection into readable and writable streams.
  */
 class WebSocketConnection {
   public url: string;
   private socket: WebSocket;
-  // Deferred that resolves when the connection opens.
-  private opened: Deferred<Socket>;
-  // Deferred that resolves when the socket closes.
-  private closed: Deferred<{ closeCode: number; reason: string }>;
+  private openDeferred: Deferred<Socket>;
+  private closeDeferred: Deferred<{ closeCode: number; reason: string }>;
 
-  public getOpened(): Promise<Socket> {
-    return this.opened.getPromise();
-  }
-
-  public getClosed(): Promise<{ closeCode: number; reason: string }> {
-    return this.closed.getPromise();
-  }
-
+  /**
+   * Initializes a new WebSocket connection.
+   *
+   * @param url - The WebSocket URL.
+   * @param options - Optional protocols.
+   */
   constructor(url: string, options?: { protocols?: string | string[] }) {
     this.url = url;
     this.socket = new WebSocket(url, options?.protocols);
     this.socket.binaryType = "arraybuffer";
-    this.opened = new Deferred();
-    this.closed = new Deferred();
+    this.openDeferred = new Deferred<Socket>();
+    this.closeDeferred = new Deferred<{ closeCode: number; reason: string }>();
 
     let hasOpened = false;
 
-    // When the socket opens, resolve the deferred with connection details.
+    // When the socket opens, resolve the openDeferred with connection details.
     this.socket.onopen = () => {
       hasOpened = true;
-      this.opened.resolve({
+      this.openDeferred.resolve({
         extensions: this.socket.extensions,
         protocol: this.socket.protocol,
-        readable: new ReadableStream<Uint8Array<ArrayBufferLike>>({
+        readable: new ReadableStream<Uint8Array>({
           start: (controller) => {
-            this.socket.onmessage = (event: MessageEvent<Uint8Array>) => {
+            // Forward incoming messages to the stream controller.
+            this.socket.onmessage = (event: MessageEvent) => {
               if (typeof event.data === "string") {
-                controller.enqueue(event.data);
+                controller.enqueue(new TextEncoder().encode(event.data));
               } else {
                 controller.enqueue(new Uint8Array(event.data));
               }
             };
-
-            this.socket.onerror = () => {
-              controller.error(new Error("WebSocket error"));
-            };
-
+            // Report errors to the stream controller.
+            this.socket.onerror = () => controller.error(new Error("WebSocket error"));
+            // Close the stream when the socket closes.
             this.socket.onclose = (event) => {
               try {
                 controller.close();
               } catch {
-                // Ignore errors during close
+                // Ignore errors during stream close.
               }
-              this.closed.resolve({
+              this.closeDeferred.resolve({
                 closeCode: event.code,
                 reason: event.reason,
               });
@@ -137,92 +112,106 @@ class WebSocketConnection {
         }),
         writable: new MaybeConsumable.WritableStream<Uint8Array>({
           write: async (chunk: Uint8Array) => {
-            // Wait until bufferedAmount is low enough.
-            //while (this.socket.bufferedAmount > 8388608) {
-            //    await delay(10);
-            //}
             this.socket.send(chunk);
           },
         }),
       });
     };
 
-    // If an error occurs before the socket is opened, reject the opened deferred.
+    // If an error occurs before the socket opens, reject the openDeferred.
     this.socket.onerror = () => {
       if (!hasOpened) {
-        this.opened.reject(new Error("WebSocket connection error"));
+        this.openDeferred.reject(new Error("WebSocket connection error"));
       }
     };
   }
 
+  /** Returns a promise that resolves when the connection is open. */
+  public getOpened(): Promise<Socket> {
+    return this.openDeferred.promise;
+  }
+
+  /** Returns a promise that resolves when the connection is closed. */
+  public getClosed(): Promise<{ closeCode: number; reason: string }> {
+    return this.closeDeferred.promise;
+  }
+
+  /** Closes the WebSocket connection. */
   public close(closeInfo?: { closeCode?: number; reason?: string }): void {
     this.socket.close(closeInfo?.closeCode, closeInfo?.reason);
   }
 }
 
 /**
- * Creates a WebSocket connection to the ADB server bridge and returns an object
- * conforming to AdbServerClient.ServerConnection.
- *
- * @param onTimeout - Callback invoked if the connection times out.
+ * A `AdbServerClient.ServerConnector` implementation using a WebSocket connection.
  */
-export async function createWebSocketBridge(
-  onTimeout: () => void
-): Promise<AdbServerClient.ServerConnection> {
-  const connection = new WebSocketConnection(bridgeWebsocketAddress);
-
-  let hasOpened = false;
-
-  // Wait for the connection to open or timeout after 5000ms.
-  const connectionResult = await Promise.race([
-    connection.getOpened(),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => {
-        if (!hasOpened) onTimeout();
-        reject(new Error("WebSocket connection timed out"));
-      }, 5000)
-    ),
-  ]);
-  hasOpened = true;
-
-  // Get a writer from the writable stream.
-  const writer = connectionResult.writable.getWriter();
-
-  return {
-    readable: connectionResult.readable,
-    writable: new MaybeConsumable.WritableStream<Uint8Array>({
-      write: (chunk) => writer.write(chunk),
-      close: () => writer.close(),
-    }),
-    close: () => connection.close(),
-    closed: connection.getClosed().then(() => { }),
-  };
-}
-
-/**
- * An `AdbServerClient.ServerConnector` implementation for Node.js.
- */
-export class AdbServerWebSocketConnector
-  implements AdbServerClient.ServerConnector {
-
+export class AdbServerWebSocketConnector implements AdbServerClient.ServerConnector {
   constructor() { }
 
+  /**
+   * Connects to the ADB server bridge using a WebSocket connection.
+   *
+   * @returns A promise that resolves to the ADB server connection.
+   */
   async connect(): Promise<AdbServerClient.ServerConnection> {
-    return createWebSocketBridge(console.error);
+    const connection = new WebSocketConnection(bridgeWebsocketAddress);
+    let timer: ReturnType<typeof setTimeout> | undefined = undefined;
+
+    // Create a timeout promise that rejects after 5000ms.
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        console.error("WebSocket connection timed out");
+        reject(new Error("WebSocket connection timed out"));
+      }, 5000);
+    });
+
+    // Wait for the connection to open or for the timeout.
+    const connectionResult = await Promise.race([
+      connection.getOpened(),
+      timeoutPromise,
+    ]);
+    clearTimeout(timer);
+
+    // Obtain a writer from the writable stream.
+    const writer = connectionResult.writable.getWriter();
+    return {
+      readable: connectionResult.readable,
+      writable: new MaybeConsumable.WritableStream<Uint8Array>({
+        write: (chunk) => writer.write(chunk),
+        close: () => writer.close(),
+      }),
+      close: () => connection.close(),
+      closed: connection.getClosed().then(() => { }),
+    };
   }
 
+  /**
+   * Not implemented: Adds a reverse tunnel.
+   *
+   * @throws Method not implemented.
+   */
   async addReverseTunnel(
     handler: AdbIncomingSocketHandler,
-    address?: string,
+    address?: string
   ): Promise<string> {
     throw new Error("Method not implemented.");
   }
 
-  removeReverseTunnel(address: string) {
+  /**
+   * Not implemented: Removes a reverse tunnel.
+   *
+   * @throws Method not implemented.
+   */
+  removeReverseTunnel(address: string): void {
     throw new Error("Method not implemented.");
   }
 
-  clearReverseTunnels() {
+  /**
+   * Not implemented: Clears all reverse tunnels.
+   *
+   * @throws Method not implemented.
+   */
+  clearReverseTunnels(): void {
     throw new Error("Method not implemented.");
   }
 }
