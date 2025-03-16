@@ -1,7 +1,8 @@
 import type { AdbIncomingSocketHandler, AdbServerClient } from "@yume-chan/adb";
 import {
   MaybeConsumable,
-  PushReadableStream,
+  ReadableStream,
+  ReadableWritablePair
 } from "@yume-chan/stream-extra";
 
 export const bridgeWebsocketAddress = "ws://127.0.0.1:25037/bridge";
@@ -68,6 +69,11 @@ class Deferred<T> {
   }
 }
 
+interface Socket extends ReadableWritablePair<Uint8Array, Uint8Array>{
+  extensions: string;
+  protocol: string;
+}
+
 /**
  * Wraps a WebSocket connection into Readable and Writable streams.
  */
@@ -75,21 +81,11 @@ class WebSocketConnection {
   public url: string;
   private socket: WebSocket;
   // Deferred that resolves when the connection opens.
-  private opened: Deferred<{
-    extensions: string;
-    protocol: string;
-    readable: ReadableStream<Uint8Array | string>;
-    writable: WritableStream<Uint8Array>;
-  }>;
+  private opened: Deferred<Socket>;
   // Deferred that resolves when the socket closes.
   private closed: Deferred<{ closeCode: number; reason: string }>;
 
-  public getOpened(): Promise<{
-    extensions: string;
-    protocol: string;
-    readable: ReadableStream<Uint8Array | string>;
-    writable: WritableStream<Uint8Array>;
-  }> {
+  public getOpened(): Promise<Socket> {
     return this.opened.getPromise();
   }
 
@@ -112,9 +108,9 @@ class WebSocketConnection {
       this.opened.resolve({
         extensions: this.socket.extensions,
         protocol: this.socket.protocol,
-        readable: new ReadableStream({
+        readable: new ReadableStream<Uint8Array<ArrayBufferLike>>({
           start: (controller) => {
-            this.socket.onmessage = (event) => {
+            this.socket.onmessage = (event: MessageEvent<Uint8Array>) => {
               if (typeof event.data === "string") {
                 controller.enqueue(event.data);
               } else {
@@ -139,7 +135,7 @@ class WebSocketConnection {
             };
           },
         }),
-        writable: new WritableStream({
+        writable: new MaybeConsumable.WritableStream<Uint8Array>({
           write: async (chunk: Uint8Array) => {
             // Wait until bufferedAmount is low enough.
             //while (this.socket.bufferedAmount > 8388608) {
@@ -193,8 +189,8 @@ export async function createWebSocketBridge(
   const writer = connectionResult.writable.getWriter();
 
   return {
-    readable: connectionResult.readable as ReadableStream<Uint8Array>,
-    writable: new WritableStream<Uint8Array>({
+    readable: connectionResult.readable,
+    writable: new MaybeConsumable.WritableStream<Uint8Array>({
       write: (chunk) => writer.write(chunk),
       close: () => writer.close(),
     }),
