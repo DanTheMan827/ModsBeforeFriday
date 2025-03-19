@@ -4,6 +4,7 @@ import { Request, Response, LogMsg, ModStatus, Mods, FixedPlayerData, ImportResu
 import { AGENT_SHA1 } from './agent_manifest';
 import { toast } from 'react-toastify';
 import { Log } from './Logging';
+import { gameId, ignorePackageId } from './game_info';
 
 const AgentPath: string = "/data/local/tmp/mbf-agent";
 const UploadsPath: string = "/data/local/tmp/mbf/uploads/";
@@ -75,7 +76,7 @@ async function saveAgent(sync: AdbSync) {
 
   await Promise.race([timeoutPromise, sync.write(options)])
 }
-  
+
 async function downloadAgent(): Promise<Uint8Array> {
   const MAX_ATTEMPTS: number = 3;
   const PROGRESS_UPDATE_INTERVAL = 1000; // Time between download progress updates, in milliseconds
@@ -140,7 +141,7 @@ async function downloadAgent(): Promise<Uint8Array> {
 async function sendRequest(adb: Adb, request: Request): Promise<Response> {
   let command_buffer = encodeUtf8(JSON.stringify(request) + "\n");
 
-  let agentProcess = await adb.subprocess.spawn(AgentPath);
+  let agentProcess = await adb.subprocess.spawn(`${AgentPath} --game-id "${gameId}" ${ignorePackageId ? "--ignore-package-id" : ""}`);
 
   const stdin = agentProcess.stdin.getWriter();
   try {
@@ -158,7 +159,7 @@ async function sendRequest(adb: Adb, request: Request): Promise<Response> {
     // Doesn't seem to consider that a chunk might not be valid UTF-8 on its own
     .pipeThrough(new TextDecoderStream())
     .getReader();
-  
+
   console.group("Agent Request");
   let buffer = "";
   let response: Response | null = null;
@@ -210,13 +211,13 @@ async function sendRequest(adb: Adb, request: Request): Promise<Response> {
       return response;
     }
   } else  {
-    // If the agent exited with a non-zero code then it failed to actually write a response to stdout: 
+    // If the agent exited with a non-zero code then it failed to actually write a response to stdout:
     // Since the agent in its current form catches all panics and other errors it should always return exit code 0
     // Hence, the agent is most likely corrupt or not executable for some other reason.
     // We will delete the agent before we quit so it is redownloaded next time MBF is restarted.
     await adb.subprocess.spawnAndWait("rm " + AgentPath)
 
-    throw new Error("Failed to invoke agent: is the executable corrupt or permissions not properly set?\nThe agent has been deleted automatically: refresh the page and the agent will be redownloaded, hopefully fixing the problem: \n" + 
+    throw new Error("Failed to invoke agent: is the executable corrupt or permissions not properly set?\nThe agent has been deleted automatically: refresh the page and the agent will be redownloaded, hopefully fixing the problem: \n" +
       await agentProcess.stderr
         .pipeThrough(new TextDecoderStream())
         .pipeThrough(new ConcatStringStream()))
@@ -264,7 +265,7 @@ export async function importFile(device: Adb,
   const sync = await device.sync();
   const tempPath = UploadsPath + file.name;
   try {
-    
+
     Log.debug("Uploading to " + tempPath);
 
     await sync.write({
