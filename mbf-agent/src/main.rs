@@ -24,7 +24,7 @@ use std::{
 };
 
 /// The ID of the APK file that MBF manages.
-pub const APK_ID: OnceLock<&str> = OnceLock::new();
+pub static APK_ID: OnceLock<&str> = OnceLock::new();
 
 /// Don't check the package ID of the qmod during install.
 pub const IGNORE_QMOD_PACKAGE_ID: OnceLock<bool> = OnceLock::new();

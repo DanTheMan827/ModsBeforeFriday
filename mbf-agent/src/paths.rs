@@ -22,48 +22,48 @@ macro_rules! init_lock_format {
 
 /// Directory that QMOD files are stored in.
 /// `$` is replaced with the game version
-pub const QMODS: OnceLock<&str> = OnceLock::new();
+pub static QMODS: OnceLock<&str> = OnceLock::new();
 /// The legacy directory used to contain QMOD files in older builds of MBF.
-pub const OLD_QMODS: OnceLock<&str> = OnceLock::new();
+pub static OLD_QMODS: OnceLock<&str> = OnceLock::new();
 /// The path of the `.nomedia` file added to ModData.
-pub const MODDATA_NOMEDIA: OnceLock<&str> = OnceLock::new();
+pub static MODDATA_NOMEDIA: OnceLock<&str> = OnceLock::new();
 /// Directory containing the modloader.
-pub const MODLOADER_DIR: OnceLock<&str> = OnceLock::new();
+pub static MODLOADER_DIR: OnceLock<&str> = OnceLock::new();
 /// Directory containing installed late mod files.
-pub const LATE_MODS: OnceLock<&str> = OnceLock::new();
+pub static LATE_MODS: OnceLock<&str> = OnceLock::new();
 /// Directory containing installed early mod files.
-pub const EARLY_MODS: OnceLock<&str> = OnceLock::new();
+pub static EARLY_MODS: OnceLock<&str> = OnceLock::new();
 /// Directory containing installed library files.
-pub const LIBS: OnceLock<&str> = OnceLock::new();
+pub static LIBS: OnceLock<&str> = OnceLock::new();
 /// The Android `files` directory for the app being modded.
-pub const ANDROID_APP_FILES: OnceLock<&str> = OnceLock::new();
+pub static ANDROID_APP_FILES: OnceLock<&str> = OnceLock::new();
 /// Path of the `PlayerData.dat` in the vanilla game.
-pub const PLAYER_DATA: OnceLock<&str> = OnceLock::new();
+pub static PLAYER_DATA: OnceLock<&str> = OnceLock::new();
 /// Path of the backup `PlayerData.dat` in the vanilla game.
-pub const PLAYER_DATA_BAK: OnceLock<&str> = OnceLock::new();
+pub static PLAYER_DATA_BAK: OnceLock<&str> = OnceLock::new();
 /// Directory containing OBBs for the app.
-pub const OBB_DIR: OnceLock<&str> = OnceLock::new();
+pub static OBB_DIR: OnceLock<&str> = OnceLock::new();
 /// Path to the `PlayerData.dat` of the `datakeeper` mod.
-pub const DATAKEEPER_PLAYER_DATA: OnceLock<&str> = OnceLock::new();
+pub static DATAKEEPER_PLAYER_DATA: OnceLock<&str> = OnceLock::new();
 /// An auxillary path that `PlayerData.dat` is copied to when modding in case it is corrupted/lost for any other reason.
-pub const AUX_DATA_BACKUP: OnceLock<&str> = OnceLock::new();
+pub static AUX_DATA_BACKUP: OnceLock<&str> = OnceLock::new();
 /// The folder that SongCore loads custom levels from.
-pub const CUSTOM_LEVELS: OnceLock<&str> = OnceLock::new();
+pub static CUSTOM_LEVELS: OnceLock<&str> = OnceLock::new();
 /// A folder that MBF uses to download temporary files.
-pub const MBF_DOWNLOADS: OnceLock<&str> = OnceLock::new();
+pub static MBF_DOWNLOADS: OnceLock<&str> = OnceLock::new();
 /// Temporary folder used by MBF during patching.
-pub const TEMP: OnceLock<&str> = OnceLock::new();
+pub static TEMP: OnceLock<&str> = OnceLock::new();
 /// Path to the MBF resource cache.
-pub const RES_CACHE: OnceLock<&str> = OnceLock::new();
+pub static RES_CACHE: OnceLock<&str> = OnceLock::new();
 /// Directories no longer used by MBF that should be deleted on startup if detected.
-pub const LEGACY_DIRS: &[&str] = &[
+pub static LEGACY_DIRS: &[&str] = &[
     "/data/local/tmp/mbf-downloads",
     "/data/local/tmp/mbf-res-cache",
     "/data/local/tmp/mbf-tmp",
     "/data/local/tmp/mbf-uploads",
 ];
 
-const INITIALIZED: OnceLock<bool> = OnceLock::new();
+static INITIALIZED: OnceLock<bool> = OnceLock::new();
 
 pub fn init_paths(apk_id: &str) {
     if *(INITIALIZED.get().unwrap_or(&false)) {
