@@ -10,7 +10,10 @@ class BridgeData {
   readonly isLocal: boolean;
 
   constructor(bridge: string) {
-    const parsed = URL.parse(`http://${bridge}`);
+    // Tsc doesn't know about URL.parse, so we need to cast it to any.
+    const parseUrl = (URL as any).parse as (url: string | URL, base?: string | URL) => URL | null;
+
+    const parsed = parseUrl(`http://${bridge}`);
     this.bridge = parsed ? bridge : "127.0.0.1:25037";
     this.websocketAddress = `ws://${bridge}/bridge`;
     this.pingAddress = `http://${bridge}/bridge/ping`;
