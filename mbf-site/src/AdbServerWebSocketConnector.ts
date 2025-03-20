@@ -3,9 +3,22 @@ import { MaybeConsumable, ReadableStream, ReadableWritablePair } from "@yume-cha
 import { PromiseResolver } from "@yume-chan/async";
 
 /** WebSocket bridge endpoints. */
-const bridge = new URLSearchParams(window.location.search).get("bridge") || "127.0.0.1:25037";
-export const bridgeWebsocketAddress = `ws://${bridge}/bridge`;
-export const bridgePingAddress = `http://${bridge}/bridge/ping`;
+class BridgeData {
+  readonly bridge: string;
+  readonly websocketAddress: string;
+  readonly pingAddress: string;
+  readonly isLocal: boolean;
+
+  constructor(bridge: string) {
+    const parsed = URL.parse(`http://${bridge}`);
+    this.bridge = parsed ? bridge : "127.0.0.1:25037";
+    this.websocketAddress = `ws://${bridge}/bridge`;
+    this.pingAddress = `http://${bridge}/bridge/ping`;
+    this.isLocal = parsed != null && ["127.0.0.1", "localhost"].includes(parsed.hostname.toLowerCase());
+  }
+}
+
+export const bridgeData = new BridgeData(new URLSearchParams(window.location.search).get("bridge") || "127.0.0.1:25037");
 
 /**
  * Checks if the bridge is running by sending a GET request to the ping endpoint.
@@ -14,7 +27,7 @@ export const bridgePingAddress = `http://${bridge}/bridge/ping`;
  */
 export async function checkForBridge(): Promise<boolean> {
   try {
-    const response = await fetch(bridgePingAddress);
+    const response = await fetch(`http://${bridgeData.bridge}/bridge/ping`);
     return response.ok;
   } catch {
     return false;
@@ -130,7 +143,7 @@ export class AdbServerWebSocketConnector implements AdbServerClient.ServerConnec
    * @returns A promise that resolves to the ADB server connection.
    */
   async connect(): Promise<AdbServerClient.ServerConnection> {
-    const connection = new WebSocketConnection(bridgeWebsocketAddress);
+    const connection = new WebSocketConnection(bridgeData.websocketAddress);
     let timer: ReturnType<typeof setTimeout> | undefined = undefined;
 
     // Create a timeout promise that rejects after 5000ms.

@@ -16,7 +16,7 @@ import { OperationModals } from './components/OperationModals';
 import { OpenLogsButton } from './components/OpenLogsButton';
 import { isViewingOnIos, isViewingOnMobile, isViewingOnWindows, usingOculusBrowser } from './platformDetection';
 import { SourceUrl } from '.';
-import { AdbServerWebSocketConnector, checkForBridge } from './AdbServerWebSocketConnector';
+import { AdbServerWebSocketConnector, bridgeData, checkForBridge } from './AdbServerWebSocketConnector';
 
 type NoDeviceCause = "NoDeviceSelected" | "DeviceInUse";
 
@@ -280,7 +280,15 @@ function ChooseDevice() {
                   </>)}
                 {navigator.usb && <>
                   <li>
-                    <button onClick={connectWebUsb}>Connect with WebUSB</button>
+                    <button onClick={async () => {
+                      if (!bridgeData.isLocal || confirm("Connecting with WebUSB will terminate the ADB server.  Are you sure you want to proceed?")) {
+                        if (bridgeData.isLocal) {
+                          await bridgeClient.killServer();
+                        }
+
+                        await connectWebUsb();
+                      }
+                    }}>Connect with WebUSB</button>
                   </li>
                 </>}
               </ul>
