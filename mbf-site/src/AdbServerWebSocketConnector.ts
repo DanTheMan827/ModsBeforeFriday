@@ -1,5 +1,6 @@
 import type { AdbIncomingSocketHandler, AdbServerClient } from "@yume-chan/adb";
 import { MaybeConsumable, ReadableStream, ReadableWritablePair } from "@yume-chan/stream-extra";
+import { PromiseResolver } from "@yume-chan/async";
 
 /** WebSocket bridge endpoints. */
 const bridge = new URLSearchParams(window.location.search).get("bridge") || "127.0.0.1:25037";
@@ -21,32 +22,6 @@ export async function checkForBridge(): Promise<boolean> {
 }
 
 /**
- * A simple Deferred implementation to encapsulate an externally resolvable promise.
- */
-class Deferred<T> {
-  public promise: Promise<T>;
-  private _resolve!: (value: T | PromiseLike<T>) => void;
-  private _reject!: (reason?: any) => void;
-
-  constructor() {
-    this.promise = new Promise<T>((resolve, reject) => {
-      this._resolve = resolve;
-      this._reject = reject;
-    });
-  }
-
-  /** Resolves the deferred promise. */
-  public resolve(value: T): void {
-    this._resolve(value);
-  }
-
-  /** Rejects the deferred promise. */
-  public reject(reason?: any): void {
-    this._reject(reason);
-  }
-}
-
-/**
  * Interface representing a socket with readable and writable streams,
  * along with connection details.
  */
@@ -61,8 +36,8 @@ interface Socket extends ReadableWritablePair<Uint8Array, Uint8Array> {
 class WebSocketConnection {
   public url: string;
   private socket: WebSocket;
-  private openDeferred: Deferred<Socket>;
-  private closeDeferred: Deferred<{ closeCode: number; reason: string }>;
+  private openDeferred: PromiseResolver<Socket>;
+  private closeDeferred: PromiseResolver<{ closeCode: number; reason: string }>;
 
   /**
    * Initializes a new WebSocket connection.
@@ -74,8 +49,8 @@ class WebSocketConnection {
     this.url = url;
     this.socket = new WebSocket(url, options?.protocols);
     this.socket.binaryType = "arraybuffer";
-    this.openDeferred = new Deferred<Socket>();
-    this.closeDeferred = new Deferred<{ closeCode: number; reason: string }>();
+    this.openDeferred = new PromiseResolver<Socket>();
+    this.closeDeferred = new PromiseResolver<{ closeCode: number; reason: string }>();
 
     let hasOpened = false;
 
@@ -182,7 +157,7 @@ export class AdbServerWebSocketConnector implements AdbServerClient.ServerConnec
         close: () => writer.close(),
       }),
       close: () => connection.close(),
-      closed: connection.getClosed().then(() => { }),
+      closed: connection.getClosed().then(() => undefined),
     };
   }
 
