@@ -13,10 +13,10 @@ class BridgeData {
     // Tsc doesn't know about URL.parse, so we need to cast it to any.
     const parseUrl = (URL as any).parse as (url: string | URL, base?: string | URL) => URL | null;
 
-    const parsed = parseUrl(`http://${bridge}`);
-    this.bridge = parsed ? bridge : "127.0.0.1:25037";
-    this.websocketAddress = `ws://${bridge}/bridge`;
-    this.pingAddress = `http://${bridge}/bridge/ping`;
+    const parsed = (/^https?:\/\//i).exec(bridge) ? parseUrl(bridge)! : parseUrl(`http://${bridge}`)!;
+    this.bridge = parsed ? parsed.host : "127.0.0.1:25037";
+    this.websocketAddress = `ws${parsed.protocol.toLowerCase() == "https:" ? "s" : ""}://${this.bridge}/bridge`;
+    this.pingAddress = `${parsed.protocol}://${this.bridge}/bridge/ping`;
     this.isLocal = parsed != null && ["127.0.0.1", "localhost"].includes(parsed.hostname.toLowerCase());
   }
 }
@@ -30,7 +30,7 @@ export const bridgeData = new BridgeData(new URLSearchParams(window.location.sea
  */
 export async function checkForBridge(): Promise<boolean> {
   try {
-    const response = await fetch(`http://${bridgeData.bridge}/bridge/ping`);
+    const response = await fetch(bridgeData.pingAddress);
     return response.ok;
   } catch {
     return false;
