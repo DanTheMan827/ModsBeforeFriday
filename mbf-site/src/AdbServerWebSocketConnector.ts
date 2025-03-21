@@ -16,7 +16,7 @@ class BridgeData {
     const parsed = (/^https?:\/\//i).exec(bridge) ? parseUrl(bridge)! : parseUrl(`http://${bridge}`)!;
     this.bridge = parsed ? parsed.host : "127.0.0.1:25037";
     this.websocketAddress = `ws${parsed.protocol.toLowerCase() == "https:" ? "s" : ""}://${this.bridge}/bridge`;
-    this.pingAddress = `${parsed.protocol}://${this.bridge}/bridge/ping`;
+    this.pingAddress = `${parsed.protocol}//${this.bridge}/bridge/ping`;
     this.isLocal = parsed != null && ["127.0.0.1", "localhost"].includes(parsed.hostname.toLowerCase());
   }
 }
