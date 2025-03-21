@@ -21,20 +21,38 @@ class BridgeData {
   }
 }
 
-export const bridgeData = new BridgeData(new URLSearchParams(window.location.search).get("bridge") || "127.0.0.1:25037");
+export const bridgeData = (() => {
+  const params = new URLSearchParams(location.search);
+
+  if (params.has("bridge") && params.get("bridge") === "") {
+    return new BridgeData(location.href);
+  }
+
+  if (params.has("bridge")) {
+    return new BridgeData(params.get("bridge")!);
+  }
+
+  return new BridgeData("127.0.0.1:25037");
+})();
 
 /**
  * Checks if the bridge is running by sending a GET request to the ping endpoint.
  *
  * @returns A promise that resolves to true if the bridge is running, false otherwise.
  */
-export async function checkForBridge(): Promise<boolean> {
+export async function checkForBridge(address?: string): Promise<boolean> {
   try {
-    const response = await fetch(bridgeData.pingAddress);
-    return response.ok;
+    const response = await fetch(address || bridgeData.pingAddress);
+    if (response.ok) {
+      // Read the response body
+      var text = await response.text();
+      return text === "OK";
+    }
   } catch {
     return false;
   }
+
+  return false;
 }
 
 /**
