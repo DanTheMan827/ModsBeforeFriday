@@ -82,7 +82,7 @@ pub(super) fn get_app_info() -> Result<Option<response::AppInfo>> {
     }))
 }
 
-fn get_manifest_info_and_xml(apk: &mut ZipFile<File>) -> Result<(ManifestInfo, String)> {
+pub fn get_manifest_info_and_xml(apk: &mut ZipFile<File>) -> Result<(ManifestInfo, String)> {
     let manifest = apk
         .read_file("AndroidManifest.xml")
         .context("Reading manifest file from APK")?;

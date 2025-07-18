@@ -9,6 +9,8 @@ mod patching;
 mod paths;
 
 use anyhow::{Context, Result};
+#[cfg(feature = "cli")]
+use clap::{ command, Parser };
 use downloads::DownloadConfig;
 use log::{debug, error, warn, Level};
 use mbf_res_man::res_cache::ResCache;
@@ -141,6 +143,7 @@ fn write_response(response: response::Response) -> Result<()> {
 
 static LOGGER: ResponseLogger = ResponseLogger {};
 
+#[cfg(not(feature = "cli"))]
 fn main() -> Result<()> {
     #[cfg(feature = "request_timing")]
     let start_time = Instant::now();
@@ -176,4 +179,256 @@ fn main() -> Result<()> {
     };
 
     Ok(())
+}
+
+#[cfg(feature = "cli")]
+use std::path::PathBuf;
+
+#[cfg(feature = "cli")]
+fn parse_key_val(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .ok_or_else(|| format!("Invalid KEY=VALUE format: `{}`", s))
+}
+
+#[cfg(feature = "cli")]
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct CliArgs {
+    /// The APK file to patch
+    #[arg(index = 1)]
+    apk: PathBuf,
+    
+    /// Path to the unstripped libunity.so file
+    #[clap(long)]
+    libunity_path: Option<PathBuf>,
+    
+    /// Only update the manifest, do not apply any other patches.
+    #[clap(long)]
+    manifest_only: bool,
+    
+    
+    /// Permission to add to the manifest.
+    #[clap(long = "add-permission", value_name = "PERMISSION", num_args = 1..)]
+    add_permissions: Vec<String>,
+    
+    /// Permission to remove from the manifest.
+    #[clap(long = "remove-permission", value_name = "PERMISSION", num_args = 1..)]
+    remove_permissions: Vec<String>,
+    
+    /// Feature to add to the manifest.
+    #[clap(long = "add-feature", value_name = "FEATURE", num_args = 1..)]
+    add_features: Vec<String>,
+    
+    /// Feature to remove from the manifest.
+    #[clap(long = "remove-feature", value_name = "FEATURE", num_args = 1..)]
+    remove_features: Vec<String>,
+    
+    /// Metadata to add to the manifest.
+    #[clap(long = "add-metadata", value_name = "KEY=VALUE", num_args = 1.., value_parser = parse_key_val)]
+    add_metadata: Vec<(String, String)>,
+    
+    /// Metadata to remove from the manifest.
+    #[clap(long = "remove-metadata", value_name = "METADATA_KEY", num_args = 1..)]
+    remove_metadata: Vec<String>,
+    
+    /// Native library to add to the manifest.
+    #[clap(long = "add-library", value_name = "LIBRARY", num_args = 1..)]
+    add_libraries: Vec<String>,
+    
+    /// Native library to remove from the manifest.
+    #[clap(long = "remove-library", value_name = "LIBRARY", num_args = 1..)]
+    remove_libraries: Vec<String>,
+    
+    /// Path to a replacement splash image shown at launch.
+    #[clap(long)]
+    vr_splash_path: Option<PathBuf>,
+    
+    /// Microphone Access
+    #[clap(long = "microphone")]
+    patch_microphone: bool,
+    
+    /// Passthrough to headset cameras
+    #[clap(long = "passthrough")]
+    patch_passthrough: bool,
+    
+    /// Body tracking support
+    #[clap(long = "body-tracking")]
+    patch_body_tracking: bool,
+    
+    /// Hand tracking support
+    #[clap(long = "hand-tracking")]
+    patch_hand_tracking: bool,
+    
+    /// Bluetooth support
+    #[clap(long = "bluetooth")]
+    patch_bluetooth: bool,
+    
+    /// MRC workaround
+    #[clap(long)]
+    mrc_workaround: bool,
+}
+
+#[cfg(feature = "cli")]
+mod android_manifest;
+
+#[cfg(feature = "cli")]
+fn main() -> Result<()> {
+    use android_manifest::AndroidManifest;
+    use crate::handlers::mod_status::get_manifest_info_and_xml;
+    use mbf_zip::ZipFile;
+    
+    let mut args = CliArgs::parse();
+    
+    let (_manifest_info, manifest_xml) = {
+        let apk_reader = std::fs::File::open(&args.apk).context("Opening APK file")?;
+        let mut apk = ZipFile::open(apk_reader).context("Reading APK as ZIP")?;
+
+        get_manifest_info_and_xml(&mut apk)?
+    };
+    println!("Decoded manifest: {}", manifest_xml);
+    let mut manifest = AndroidManifest::new(&manifest_xml).unwrap();
+    println!("Parsed manifest: {}", manifest.to_string());
+    
+    manifest.apply_patching_manifest_mod();
+    
+    if args.patch_microphone {
+        args.add_permissions.push("android.permission.RECORD_AUDIO".into());
+    }
+    
+    if args.patch_passthrough {
+        args.add_permissions.push("com.oculus.feature.PASSTHROUGH".into());
+    }
+    
+    if args.patch_body_tracking {
+        args.add_permissions.push("com.oculus.permission.BODY_TRACKING".into());
+        args.add_features.push("com.oculus.software.body_tracking".into())
+    }
+    
+    if args.patch_hand_tracking {
+        args.add_permissions.push("com.oculus.permission.HAND_TRACKING".into());
+        args.add_features.push("oculus.software.handtracking".into());
+        args.add_metadata.push(("com.oculus.handtracking.frequency".into(), "MAX".into()));
+        args.add_metadata.push(("com.oculus.handtracking.version".into(), "V2.0".into()));
+    }
+    
+    if args.patch_bluetooth {
+        args.add_permissions.push("android.permission.BLUETOOTH".into());
+        args.add_permissions.push("android.permission.BLUETOOTH_CONNECT".into());
+    }
+    
+    if args.mrc_workaround {
+        args.add_libraries.push("libOVRMrcLib.oculus.so".into());
+    }
+    
+    // Add the specified permissions.
+    if !args.add_permissions.is_empty() {
+        for perm in &args.add_permissions {
+            if !manifest.has_permission(perm) {
+                println!("Adding permission: {}", perm);
+                manifest.add_permission(perm);
+            } else {
+                println!("Permission {} already exists in manifest, skipping addition", perm);
+            }
+        }
+    }
+    
+    // Remove the specified permissions.
+    if !args.remove_permissions.is_empty() {
+        for perm in &args.remove_permissions {
+            if manifest.has_permission(perm) {
+                println!("Removing permission: {}", perm);
+                manifest.remove_permission(perm);
+            } else {
+                println!("Permission {} not found in manifest, skipping removal", perm);
+            }
+        }
+    }
+    
+    // Add the specified features.
+    if !args.add_features.is_empty() {
+        for feat in &args.add_features {
+            if !manifest.has_feature(feat) {
+                println!("Adding feature: {}", feat);
+                manifest.add_feature(feat);
+            } else {
+                println!("Feature {} already exists in manifest, skipping addition", feat);
+            }
+        }
+    }
+    
+    // Remove the specified features.
+    if !args.remove_features.is_empty() {
+        for feat in &args.remove_features {
+            if manifest.has_feature(feat) {
+                println!("Removing feature: {}", feat);
+                manifest.remove_feature(feat);
+            } else {
+                println!("Feature {} not found in manifest, skipping removal", feat);
+            }
+        }
+    }
+    
+    // Add the specified metadata.
+    if !args.add_metadata.is_empty() {
+        for (name, value) in &args.add_metadata {
+            if !manifest.has_metadata(name) {
+                println!("Adding metadata: {}={}", name, value);
+                manifest.set_metadata(name, value);
+            } else {
+                println!("Metadata {} already exists in manifest, skipping addition", name);
+            }
+        }
+    }
+    
+    // Remove the specified metadata.
+    if !args.remove_metadata.is_empty() {
+        for name in &args.remove_metadata {
+            if manifest.has_metadata(name) {
+                println!("Removing metadata: {}", name);
+                manifest.remove_metadata(name);
+            } else {
+                println!("Metadata {} not found in manifest, skipping removal", name);
+            }
+        }
+    }
+    
+    // Add the specified native libraries.
+    if !args.add_libraries.is_empty() {
+        for lib in &args.add_libraries {
+            if !manifest.has_native_library(lib) {
+                println!("Adding native library: {}", lib);
+                manifest.add_native_library(lib);
+            } else {
+                println!("Native library {} already exists in manifest, skipping addition", lib);
+            }
+        }
+    }
+    
+    // Remove the specified native libraries.
+    if !args.remove_libraries.is_empty() {
+        for lib in &args.remove_libraries {
+            if manifest.has_native_library(lib) {
+                println!("Removing native library: {}", lib);
+                manifest.remove_native_library(lib);
+            } else {
+                println!("Native library {} not found in manifest, skipping removal", lib);
+            }
+        }
+    }
+    
+    println!("Final manifest: {}", manifest.to_string());
+    
+    let vr_splash_path = {
+      if (args.vr_splash_path.is_some() && args.vr_splash_path.as_ref().unwrap().exists()) {
+          let leaked: &'static str = Box::leak(args.vr_splash_path.unwrap().to_string_lossy().to_string().into_boxed_str());
+          
+          Some(leaked)
+      } else {
+          None
+      }
+    };
+    
+    return patching::patch_apk_in_place(args.apk, args.libunity_path, manifest.to_string(), args.manifest_only, vr_splash_path)
+        .context("Patching APK");
 }

@@ -426,7 +426,7 @@ pub fn get_modloader_status() -> Result<InstallStatus> {
     }
 }
 
-fn patch_apk_in_place(
+pub fn patch_apk_in_place(
     path: impl AsRef<Path>,
     libunity_path: Option<PathBuf>,
     manifest_mod: String,

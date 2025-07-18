@@ -16,7 +16,7 @@ use mbf_res_man::res_cache::ResCache;
 
 mod import;
 mod mod_management;
-mod mod_status;
+pub mod mod_status;
 mod patching;
 mod utility;
 
