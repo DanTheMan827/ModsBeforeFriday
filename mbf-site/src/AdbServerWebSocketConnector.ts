@@ -4,6 +4,7 @@ import { PromiseResolver } from "@yume-chan/async";
 import { IBridge } from "./BridgeFactory";
 import { createElement, ReactNode } from "react";
 import { PagePinger } from "./PagePinger";
+import "core-js/web/url";
 
 /** WebSocket bridge endpoints. */
 class BridgeData {
