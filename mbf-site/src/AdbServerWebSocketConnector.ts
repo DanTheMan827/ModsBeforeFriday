@@ -1,6 +1,7 @@
 import type { AdbIncomingSocketHandler, AdbServerClient } from "@yume-chan/adb";
 import { MaybeConsumable, ReadableStream, ReadableWritablePair } from "@yume-chan/stream-extra";
 import { PromiseResolver } from "@yume-chan/async";
+import "core-js/web/url";
 
 /** WebSocket bridge endpoints. */
 class BridgeData {
