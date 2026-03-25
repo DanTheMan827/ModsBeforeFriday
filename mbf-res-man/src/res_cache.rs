@@ -110,6 +110,24 @@ impl<'agent> ResCache<'agent> {
         self.agent
     }
 
+    /// Removes the cached file and its ETag entry for `cached_file_name`, if present.
+    pub fn remove_cached(&self, cached_file_name: &str) -> Result<()> {
+        let cached_path = self.cache_root.join(cached_file_name);
+        if cached_path.exists() {
+            std::fs::remove_file(cached_path)?;
+        }
+
+        self.load_etag_cache()?;
+        let mut etag_cache_ref = self.etag_cache.borrow_mut();
+        let etag_cache = etag_cache_ref.as_mut().unwrap();
+        if etag_cache.remove(cached_file_name).is_some() {
+            drop(etag_cache_ref);
+            self.save_etag_cache()?;
+        }
+
+        Ok(())
+    }
+
     /// Gets a file from the provided URL and caches it at `cached_file_name` within the `cache_root`,
     /// if there is no cached copy already or the cached copy is out of date.
     ///
@@ -196,7 +214,12 @@ impl<'agent> ResCache<'agent> {
 
         match serde_json::from_slice(&json_bytes) {
             Ok(result) => Ok(result),
-            Err(parse_err) => Err(JsonPullError::ParseError(parse_err)),
+            Err(parse_err) => {
+                if let Err(e) = self.remove_cached(cached_file_name) {
+                    warn!("Failed to remove corrupted cache file {cached_file_name}: {e}");
+                }
+                Err(JsonPullError::ParseError(parse_err))
+            }
         }
     }
 }
