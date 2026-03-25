@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use log::{debug, warn};
 use serde::de::DeserializeOwned;
 
@@ -147,39 +147,48 @@ impl<'agent> ResCache<'agent> {
                 "If-Modified-Since",
                 &httpdate::fmt_http_date(cache_last_modified),
             );
-        }
 
-        let mut etag_cache_ref = self.etag_cache.borrow_mut();
-        let etag_cache = etag_cache_ref.as_mut().unwrap();
-
-        if let Some(cached_etag) = etag_cache.get(cached_file_name) {
-            request = request.set("If-None-Match", &cached_etag);
+            let etag_cache_ref = self.etag_cache.borrow();
+            let etag_cache = etag_cache_ref.as_ref().unwrap();
+            if let Some(cached_etag) = etag_cache.get(cached_file_name) {
+                request = request.set("If-None-Match", cached_etag);
+            }
         }
 
         let resp = request.call().context("HTTP GET to get file to cache")?;
-        if resp.status() != 304 {
-            // If cached file out of date. (or no cache)
-            if let Some(etag) = resp.header("ETag") {
-                debug!("Got ETag {etag} for {cached_file_name}");
-                etag_cache.insert(cached_file_name.to_owned(), etag.to_owned());
-                drop(etag_cache_ref);
-                self.save_etag_cache()?;
+        match resp.status() {
+            304 => {
+                // Cached copy is still valid
+                debug!("Using cached file {cached_file_name} for {url}");
             }
+            404 => {
+                // No cached copy and file not found at URL
+                return Err(anyhow!("File not found at {url}"));
+            }
+            200 => {
+                if let Some(etag) = resp.header("ETag") {
+                    debug!("Got ETag {etag} for {cached_file_name}");
+                    let mut etag_cache_ref = self.etag_cache.borrow_mut();
+                    let etag_cache = etag_cache_ref.as_mut().unwrap();
+                    etag_cache.insert(cached_file_name.to_owned(), etag.to_owned());
+                    drop(etag_cache_ref);
+                    self.save_etag_cache()?;
+                }
 
-            debug!("No cache, downloading {url} to {cached_file_name}");
-            // Copy response body into cache
-            let mut cache_handle = std::fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&cached_path)
-                .context("Opening cache file for writing: is the directory writable?")?;
+                debug!("Downloading {url} to {cached_file_name}");
+                let mut cache_handle = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&cached_path)
+                    .context("Opening cache file for writing: is the directory writable?")?;
 
-            std::io::copy(&mut resp.into_reader(), &mut cache_handle)
-                .context("Copying response to cache")?;
-        } else {
-            // If using cache, ETag should be the same so no need to check it again.
-            debug!("Using cached file {cached_file_name} for {url}");
+                std::io::copy(&mut resp.into_reader(), &mut cache_handle)
+                    .context("Copying response to cache")?;
+            }
+            status => {
+                return Err(anyhow!("Unexpected HTTP {status} response fetching {url}"));
+            }
         }
 
         Ok(std::fs::File::open(cached_path)?)
