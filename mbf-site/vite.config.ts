@@ -21,21 +21,21 @@ function babelTransformBigInt(): PluginObj {
 export default defineConfig({
     base: process.env.BASE_URL ?? './',
     plugins: [
-                
-        react(), 
-        viteTsconfigPaths(), 
+
+        react(),
+        viteTsconfigPaths(),
         mkcert(),
-babel({
+        babel({
             babelConfig: {
                 plugins: [babelTransformBigInt],
             }
         }),
-        legacy({ 
+        legacy({
             targets: ['chrome >= 74']
-        }), 
+        }),
     ],
     server: {
-        open: process.env.BROWSER='chrome',
+        open: process.env.BROWSER ?? 'chrome',
         port: 3000,
         https: true,
     },

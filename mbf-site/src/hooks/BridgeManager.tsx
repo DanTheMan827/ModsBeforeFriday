@@ -6,11 +6,10 @@ import {
   createContext,
   useContext,
 } from "react";
-import {
-  checkForBridge,
-  AdbServerWebSocketConnector,
-} from "../AdbServerWebSocketConnector";
 import { Log } from "../Logging";
+import { MbfAdbServerConnector } from "../MbfAdbServerConnector";
+import { PromiseResolver } from "@yume-chan/async";
+import { delay } from "../utilities/delay";
 
 /**
  * Compares two arrays of device objects for equality.
@@ -74,6 +73,7 @@ export interface BridgeManagerData {
   adbDevices: AdbServerClient.Device[];
   bridgeError: unknown | null;
   scanning: boolean;
+  clearDevices: () => void;
 }
 
 export interface BridgeManagerComponents {
@@ -85,6 +85,47 @@ export interface BridgeManagerComponents {
 }
 
 const BridgeManagerContext = createContext<Readonly<BridgeManagerData> | null>(null);
+
+export function checkForBridge(): {
+  promise: Promise<boolean>;
+  abort: () => void;
+} {
+  const resolver = new PromiseResolver<boolean>();
+  const abort = new AbortController();
+      const timeout = 10000;
+      let resolved = false;
+      
+      Promise.race([
+        Promise.resolve().then(async () => {
+          for (let i = 0; true; i++) {
+            abort.signal.throwIfAborted();
+            
+            // Check for the bridge every 100ms.
+            if (window.__mbfBridge) {
+              Log.debug(`Bridge detected! ${i * 100}ms elapsed`);
+              resolved = true;
+              resolver.resolve(true);
+              return;
+            }
+            
+            await delay(100, abort.signal);
+          }
+        }).then(() => abort.abort()),
+        delay(timeout, abort.signal).then(() => {
+          abort.abort();
+          if (!resolved) {
+            Log.debug(`No bridge detected after ${timeout / 1000}s, assuming it's not present.`);
+            
+            resolver.resolve(false);
+          }
+        })
+      ]).catch(err => Log.debug("Bridge detection process aborted.", err));
+      
+      return {
+        promise: resolver.promise,
+        abort: () => abort.abort(),
+      };
+}
 
 /**
  * Data provided by the BridgeManager context.
@@ -111,12 +152,15 @@ export function useBridgeManager(): Readonly<
         setScanning(true);
 
         return () => setScanning(false);
-      }, []);
+      }, [bridgeClient]);
 
       return null;
     },
     [setScanning]
   );
+  const clearDevices = useCallback(function clearDevices() {
+    setAdbDevices([]);
+  }, [setAdbDevices]);
   const _BridgeManagerContextProvider = useCallback<
     React.FC<React.PropsWithChildren>
   >(
@@ -129,18 +173,19 @@ export function useBridgeManager(): Readonly<
             adbDevices,
             bridgeError,
             scanning,
+            clearDevices,
           }}
         >
           {children}
         </BridgeManagerContext.Provider>
       );
     },
-    [checkedForBridge, bridgeClient, adbDevices, bridgeError, scanning]
+    [checkedForBridge, bridgeClient, adbDevices, bridgeError, scanning, clearDevices]
   );
 
   const deviceUpdate = useCallback(async () => {
     try {
-      const client = new AdbServerClient(new AdbServerWebSocketConnector());
+      const client = new AdbServerClient(new MbfAdbServerConnector());
       const devices = (await client.getDevices()).filter(
         (device) => device.state == "device"
       );
@@ -152,9 +197,7 @@ export function useBridgeManager(): Readonly<
         setBridgeError(null);
       }
     } catch (err) {
-      setBridgeClient(null);
       setAdbDevices([]);
-      setCheckedForBridge(false);
       setBridgeError(err);
 
       Log.error("Failed to get devices: " + err, err);
@@ -172,14 +215,15 @@ export function useBridgeManager(): Readonly<
   useEffect(() => {
     if (checkedForBridge) return;
 
-    checkForBridge().then((haveBridge) => {
-      if (haveBridge) {
-        const client = new AdbServerClient(new AdbServerWebSocketConnector());
-        setBridgeClient(client);
-      }
+    const { promise, abort } = checkForBridge();
 
-      setCheckedForBridge(true);
-    });
+    promise.then(hasBridge => {
+      if (hasBridge) {
+        setBridgeClient(new AdbServerClient(new MbfAdbServerConnector()));
+      }
+    }).finally(() => setCheckedForBridge(true));
+    
+    return () => abort();
   }, [checkedForBridge]);
 
   // Update the available devices on an interval
@@ -200,6 +244,7 @@ export function useBridgeManager(): Readonly<
     scanning,
     DeviceScanner: _DeviceScanner,
     BridgeManagerContextProvider: _BridgeManagerContextProvider,
+    clearDevices
   };
 }
 

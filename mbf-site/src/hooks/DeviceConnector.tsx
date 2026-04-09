@@ -132,7 +132,7 @@ export function useDeviceConnector(
     setDevicePreV51(false);
     setDeviceInUse(false);
     setUsingBridge(false);
-  }, [setDevicePreV51, setAuthing, setChosenDevice, setConnecting]);
+  }, [setDeviceInUse, setUsingBridge, setDevicePreV51, setAuthing, setChosenDevice, setConnecting]);
 
   /**
    * Connects to the ADB server using WebUSB.
@@ -252,7 +252,6 @@ export function useDeviceConnector(
       setChosenDevice(device);
 
       await waitForDisconnect(device);
-      debugger;
     },
     [setDevicePreV51, setAuthing, setChosenDevice, setConnecting, clearDevice]
   );
@@ -304,7 +303,7 @@ export function useDeviceConnector(
 
       try {
         if (device) {
-          connectBridgeDevice(device);
+          await connectBridgeDevice(device);
         } else {
           const device = await connectWebUsb();
 
