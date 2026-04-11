@@ -8,64 +8,6 @@ import {
 } from "react";
 import { Log } from "../Logging";
 import { BridgeFactory, IBridge } from "../BridgeFactory";
-import { PromiseResolver } from "@yume-chan/async";
-import { delay } from "../utilities/delay";
-
-/**
- * Compares two arrays of device objects for equality.
- * Returns true if both arrays have the same length and all corresponding device objects are equal.
- *
- * @param devices1 - The first array of device objects.
- * @param devices2 - The second array of device objects.
- * @returns True if the arrays are equal, false otherwise.
- */
-function areDevicesEqual(
-  devices1: Record<string, any>[],
-  devices2: Record<string, any>[]
-): boolean {
-  if (devices1.length !== devices2.length) {
-    return false;
-  }
-
-  for (let i = 0; i < devices1.length; i++) {
-    const device1 = devices1[i];
-    const device2 = devices2[i];
-
-    if (!areObjectsEqual(device1, device2)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
- * Compares two objects for shallow equality.
- * Returns true if both objects have the same keys and all corresponding values are equal.
- *
- * @param obj1 - The first object.
- * @param obj2 - The second object.
- * @returns True if the objects are equal, false otherwise.
- */
-function areObjectsEqual(
-  obj1: Record<string, any>,
-  obj2: Record<string, any>
-): boolean {
-  const keys1 = Object.keys(obj1);
-  const keys2 = Object.keys(obj2);
-
-  if (keys1.length !== keys2.length) {
-    return false;
-  }
-
-  for (const key of keys1) {
-    if (obj1[key] !== obj2[key]) {
-      return false;
-    }
-  }
-
-  return true;
-}
 
 export interface BridgeManagerData {
   checkedForBridge: boolean;
@@ -145,40 +87,6 @@ export function useBridgeManager(): Readonly<
     [checkedForBridge, bridge, bridgeClient, adbDevices, bridgeError, scanning, clearDevices]
   );
 
-  const deviceUpdate = useCallback(async () => {
-    try {
-      const bridge = await BridgeFactory.getBridge();
-      const connector = await (bridge?.getConnector());
-      if (!connector) {
-        throw new Error("No bridge available");
-      }
-      
-      const client = new AdbServerClient(connector);
-      const devices = (await client.getDevices()).filter(
-        (device) => device.state == "device"
-      );
-
-      if (!areDevicesEqual(devices, adbDevices)) {
-        setAdbDevices(devices);
-      }
-      if (bridgeError !== null) {
-        setBridgeError(null);
-      }
-    } catch (err) {
-      setAdbDevices([]);
-      setBridgeError(err);
-
-      Log.error("Failed to get devices: " + err, err);
-    }
-  }, [
-    bridgeError,
-    setBridgeError,
-    setBridgeClient,
-    setAdbDevices,
-    setCheckedForBridge,
-    setBridgeError,
-  ]);
-
   // Check if the bridge is running
   useEffect(() => {
     if (checkedForBridge) return;
@@ -201,15 +109,46 @@ export function useBridgeManager(): Readonly<
     return () => abortController.abort();
   }, [checkedForBridge]);
 
-  // Update the available devices on an interval
+  // Monitor available devices using an observer
   useEffect(() => {
     if (!bridgeClient || !scanning) return;
 
-    const timer = setInterval(deviceUpdate, 1000);
-    deviceUpdate();
+    let observer: AdbServerClient.DeviceObserver | null = null;
+    let isStopped = false;
 
-    return () => clearInterval(timer);
-  }, [bridgeClient, scanning]);
+    bridgeClient.trackDevices({ includeStates: ["device"] }).then(obs => {
+      if (isStopped) {
+        obs.stop();
+        return;
+      }
+
+      observer = obs;
+
+      obs.onListChange(devices => {
+        setAdbDevices([...devices]);
+        setBridgeError(null);
+      });
+
+      obs.onError(err => {
+        setAdbDevices([]);
+        setBridgeError(err);
+        setScanning(false);
+        Log.error("Device observer error: " + err, err);
+      });
+    }).catch(err => {
+      if (!isStopped) {
+        setAdbDevices([]);
+        setBridgeError(err);
+        setScanning(false);
+        Log.error("Failed to start device observer: " + err, err);
+      }
+    });
+
+    return () => {
+      isStopped = true;
+      observer?.stop();
+    };
+  }, [bridgeClient, scanning, setAdbDevices, setBridgeError, setScanning]);
 
   return {
     checkedForBridge,
