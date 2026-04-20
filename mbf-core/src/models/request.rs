@@ -128,7 +128,7 @@ pub enum RequestEnum {
     GetDowngradedManifest {
         version: String,
     },
-    /// Reinstalls any core mods that are misssing/out of date and overwrites the modloader in case it is corrupt.
+    /// Reinstalls any core mods that are missing/out of date and overwrites the modloader in case it is corrupt.
     /// Should fix most issues with any installation.
     /// Returns a `Mods` response containing the newly installed mods.
     QuickFix {
