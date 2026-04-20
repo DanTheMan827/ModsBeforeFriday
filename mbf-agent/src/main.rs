@@ -160,7 +160,7 @@ fn main() -> Result<()> {
         error!("Request failed due to a panic!: {info}")
     }));
 
-    match std::panic::catch_unwind(|| handlers::handle_request(req)) {
+    match std::panic::catch_unwind(|| handlers::handle_request(req.request)) {
         Ok(resp) => match resp {
             Ok(resp) => {
                 #[cfg(feature = "request_timing")]

@@ -1,8 +1,6 @@
-//! Models used for communication *from the backend back to the frontend*
+//! Models used for communication *from the backend back to the frontend*.
 
 use serde::{Deserialize, Serialize};
-
-use crate::mod_man;
 
 #[derive(Serialize)]
 pub struct AppInfo {
@@ -84,20 +82,6 @@ pub struct ModModel {
     pub is_enabled: bool,
     // True if the mod is core or if it is a required dependency of another core mod (potentially indirectly.)
     pub is_core: bool,
-}
-
-impl From<&mod_man::Mod> for ModModel {
-    fn from(value: &mod_man::Mod) -> Self {
-        Self {
-            id: value.manifest().id.clone(),
-            name: value.manifest().name.clone(),
-            version: value.manifest().version.clone(),
-            game_version: value.manifest().package_version.clone(),
-            description: value.manifest().description.clone(),
-            is_enabled: value.installed(),
-            is_core: value.is_core(),
-        }
-    }
 }
 
 #[derive(Serialize)]

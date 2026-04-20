@@ -84,6 +84,17 @@ pub(super) fn get_mod_models(mut mod_manager: ModManager) -> Result<Vec<ModModel
 
     Ok(mod_manager
         .get_mods()
-        .map(|mod_info| ModModel::from(&*(**mod_info).borrow()))
+        .map(|mod_info| {
+            let mod_ref = (**mod_info).borrow();
+            ModModel {
+                id: mod_ref.manifest().id.clone(),
+                name: mod_ref.manifest().name.clone(),
+                version: mod_ref.manifest().version.clone(),
+                game_version: mod_ref.manifest().package_version.clone(),
+                description: mod_ref.manifest().description.clone(),
+                is_enabled: mod_ref.installed(),
+                is_core: mod_ref.is_core(),
+            }
+        })
         .collect())
 }

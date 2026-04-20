@@ -1,6 +1,7 @@
 //! Models used for communication *from the frontend to the backend*.
 
 use std::collections::HashMap;
+
 use serde::Deserialize;
 
 /// The default value for the game_id parameter.

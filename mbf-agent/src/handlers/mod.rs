@@ -1,12 +1,11 @@
 //! Responsible for handling all requests sent to the backend (`mbf-agent`) from the frontend.
 
-use std::{io::Cursor, process::Command};
+use std::{collections::HashMap, io::Cursor, process::Command};
 
 use crate::{
     downloads,
     mod_man::ModManager,
     models::{
-        request::Request,
         request::RequestEnum,
         response::{self, Response},
     }, parameters::PARAMETERS,
@@ -28,40 +27,68 @@ mod utility;
 ///
 /// # Returns
 /// If successful, a [Response] to be sent back to the frontend.
-pub fn handle_request(request: Request) -> Result<Response> {
-    match request.request {
-        RequestEnum::GetModStatus {
-            override_core_mod_url,
-        } => mod_status::handle_get_mod_status(override_core_mod_url),
-        RequestEnum::Patch {
+pub fn handle_request(request: RequestEnum) -> Result<Response> {
+    mbf_core::runtime::handle_request(&mut AgentHost {}, request)
+}
+
+struct AgentHost;
+
+impl mbf_core::runtime::Host for AgentHost {
+    fn get_mod_status(&mut self, override_core_mod_url: Option<String>) -> Result<Response> {
+        mod_status::handle_get_mod_status(override_core_mod_url)
+    }
+
+    fn patch(
+        &mut self,
+        downgrade_to: Option<String>,
+        remodding: bool,
+        manifest_mod: String,
+        allow_no_core_mods: bool,
+        device_pre_v51: bool,
+        override_core_mod_url: Option<String>,
+        vr_splash_path: Option<String>,
+    ) -> Result<Response> {
+        patching::handle_patch(
             downgrade_to,
             remodding,
             manifest_mod,
-            allow_no_core_mods,
-            device_pre_v51,
-            override_core_mod_url,
-            vr_splash_path,
-        } => patching::handle_patch(
-            downgrade_to,
-            remodding,
-            manifest_mod,
             device_pre_v51,
             allow_no_core_mods,
             override_core_mod_url,
             vr_splash_path,
-        ),
-        RequestEnum::GetDowngradedManifest { version } => {
-            patching::handle_get_downgraded_manifest(version)
-        }
-        RequestEnum::RemoveMod { id } => mod_management::handle_remove_mod(id),
-        RequestEnum::SetModsEnabled { statuses } => mod_management::handle_set_mods_enabled(statuses),
-        RequestEnum::Import { from_path } => import::handle_import(from_path, None),
-        RequestEnum::ImportUrl { from_url } => import::handle_import_mod_url(from_url),
-        RequestEnum::FixPlayerData => utility::handle_fix_player_data(),
-        RequestEnum::QuickFix {
-            override_core_mod_url,
-            wipe_existing_mods,
-        } => utility::handle_quick_fix(override_core_mod_url, wipe_existing_mods),
+        )
+    }
+
+    fn get_downgraded_manifest(&mut self, version: String) -> Result<Response> {
+        patching::handle_get_downgraded_manifest(version)
+    }
+
+    fn remove_mod(&mut self, id: String) -> Result<Response> {
+        mod_management::handle_remove_mod(id)
+    }
+
+    fn set_mods_enabled(&mut self, statuses: HashMap<String, bool>) -> Result<Response> {
+        mod_management::handle_set_mods_enabled(statuses)
+    }
+
+    fn import(&mut self, from_path: String) -> Result<Response> {
+        import::handle_import(from_path, None)
+    }
+
+    fn import_url(&mut self, from_url: String) -> Result<Response> {
+        import::handle_import_mod_url(from_url)
+    }
+
+    fn fix_player_data(&mut self) -> Result<Response> {
+        utility::handle_fix_player_data()
+    }
+
+    fn quick_fix(
+        &mut self,
+        override_core_mod_url: Option<String>,
+        wipe_existing_mods: bool,
+    ) -> Result<Response> {
+        utility::handle_quick_fix(override_core_mod_url, wipe_existing_mods)
     }
 }
 

@@ -1,5 +1,9 @@
-//! This module contains data models that are used to communicate between the MBF frontend and backend (this project)
-//! [serde_json] is used for JSON serialization/deserialization of these models.
+//! Re-exports protocol models from `mbf-core`.
 
-pub mod request;
-pub mod response;
+pub mod request {
+    pub use mbf_core::models::request::*;
+}
+
+pub mod response {
+    pub use mbf_core::models::response::*;
+}
