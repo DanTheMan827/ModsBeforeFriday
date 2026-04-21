@@ -827,6 +827,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "ureq",
  "xml",
 ]
 

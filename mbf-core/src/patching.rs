@@ -14,10 +14,10 @@ use crate::{
     resources::{self, ResCache},
 };
 
-const DEBUG_CERT_PEM: &[u8] = include_bytes!("../../mbf-agent/src/debug_cert.pem");
-const LIB_MAIN: &[u8] = include_bytes!("../../mbf-agent/libs/libmain.so");
-const MODLOADER: &[u8] = include_bytes!("../../mbf-agent/libs/libsl2.so");
-const LEGACY_OVRPLATFORMLOADER: &[u8] = include_bytes!("../../mbf-agent/libs/libovrplatformloader.so");
+const DEBUG_CERT_PEM: &[u8] = include_bytes!("debug_cert.pem");
+const LIB_MAIN: &[u8] = include_bytes!("../libs/libmain.so");
+const MODLOADER: &[u8] = include_bytes!("../libs/libsl2.so");
+const LEGACY_OVRPLATFORMLOADER: &[u8] = include_bytes!("../libs/libovrplatformloader.so");
 
 const MODLOADER_NAME: &str = "libsl2.so";
 const MOD_TAG_PATH: &str = "modded.json";
@@ -372,10 +372,7 @@ fn patch_apk_in_place<H: Host>(
     Ok(())
 }
 
-fn add_modded_tag<T: std::io::Read + std::io::Write + std::io::Seek>(
-    to: &mut ZipFile<T>,
-    tag: ModTag,
-) -> Result<()> {
+fn add_modded_tag(to: &mut ZipFile<std::fs::File>, tag: ModTag) -> Result<()> {
     let saved_tag = serde_json::to_vec_pretty(&tag)?;
     to.write_file(MOD_TAG_PATH, &mut Cursor::new(saved_tag), FileCompression::Deflate)?;
     Ok(())
@@ -425,10 +422,7 @@ pub fn check_obb_present<H: Host>(host: &mut H) -> Result<bool> {
     }))
 }
 
-fn patch_manifest<T: std::io::Read + std::io::Write + std::io::Seek>(
-    zip: &mut ZipFile<T>,
-    additional_properties: String,
-) -> Result<()> {
+fn patch_manifest(zip: &mut ZipFile<std::fs::File>, additional_properties: String) -> Result<()> {
     let mut xml_reader = xml::EventReader::new(Cursor::new(additional_properties.as_bytes()));
     let mut data_output = Cursor::new(Vec::new());
     let mut axml_writer = AxmlWriter::new(&mut data_output);

@@ -19,3 +19,6 @@ xml = "0.8.20"
 jsonschema = { version = "0.18.0", default-features = false }
 const_format = "0.2.32"
 log = "0.4.22"
+
+[build-dependencies]
+ureq = "2.9.6"

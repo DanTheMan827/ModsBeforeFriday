@@ -43,6 +43,7 @@ fn get_diff_index_graph<H: Host>(
     res_cache: &mut ResCache,
 ) -> Result<HashMap<String, Vec<VersionDiffs>>> {
     let diff_index: DiffIndex = resources::get_diff_index(host, res_cache)
+        .map_err(anyhow::Error::from)
         .context("Fetching downgrading information")?;
 
     let mut edges: HashMap<String, Vec<VersionDiffs>> = HashMap::new();

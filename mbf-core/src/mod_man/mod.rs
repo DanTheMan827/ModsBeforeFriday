@@ -27,7 +27,7 @@ use crate::{
 };
 
 /// The JSON schema for the `mod.json` file within a qmod.
-const QMOD_SCHEMA: &str = include_str!("../../../mbf-agent/src/mod_man/qmod_schema.json");
+const QMOD_SCHEMA: &str = include_str!("qmod_schema.json");
 /// The maximum `_QPVersion` that MBF will accept in `mod.json`.
 const MAX_SCHEMA_VERSION: Version = Version::new(1, 2, 0);
 

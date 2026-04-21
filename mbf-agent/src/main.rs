@@ -1,25 +1,18 @@
-mod data_fix;
 mod downloads;
 mod handlers;
-mod manifest;
-mod mod_man;
+mod host;
 mod models;
-mod patching;
 mod parameters;
-mod downgrading;
 
 use anyhow::{Context, Result};
 use downloads::DownloadConfig;
 use log::{debug, error, warn, Level};
-use mbf_res_man::res_cache::ResCache;
 use models::{request, response};
 use parameters::{init_parameters, PARAMETERS};
-use serde::{Deserialize, Serialize};
 use std::{
     io::{BufRead, BufReader, Write},
     panic,
     path::Path,
-    process::Command,
     sync,
 };
 
@@ -55,42 +48,6 @@ pub fn get_dl_cfg() -> &'static DownloadConfig<'static> {
             ureq_agent: mbf_res_man::default_agent::get_agent(),
         }
     })
-}
-
-/// Creates a ResCache for downloading files using mbf_res_man
-/// This should be reused where possible.
-pub fn load_res_cache() -> Result<ResCache<'static>> {
-    std::fs::create_dir_all(&PARAMETERS.res_cache).expect("Failed to create resource cache folder");
-    Ok(ResCache::new(
-        (&PARAMETERS.res_cache).into(),
-        mbf_res_man::default_agent::get_agent(),
-    ))
-}
-
-pub fn get_apk_path() -> Result<Option<String>> {
-    let pm_output = Command::new("pm")
-        .args(["path", &PARAMETERS.apk_id])
-        .output()
-        .context("Working out APK path")?;
-    if 8 > pm_output.stdout.len() {
-        // App not installed
-        Ok(None)
-    } else {
-        Ok(Some(
-            std::str::from_utf8(pm_output.stdout.split_at(8).1)?
-                .trim_end()
-                .to_owned(),
-        ))
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-struct ModTag {
-    patcher_name: String,
-    patcher_version: Option<String>,
-    modloader_name: String,
-    modloader_version: Option<String>,
 }
 
 struct ResponseLogger {}
