@@ -353,6 +353,22 @@ fn copy_to_with_crc(from: &mut impl Read, to: &mut impl Write) -> Result<u32> {
 }
 
 impl ZipFile<File> {
+    /// Opens a ZIP archive from a file path (read-only).
+    pub fn open_path(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let file = File::open(path)?;
+        Self::open(file)
+    }
+
+    /// Opens a ZIP archive from a file path (read+write).
+    pub fn open_rw_path(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .context("Opening ZIP file for read+write")?;
+        Self::open(file)
+    }
+
     /// Sets the alignment for files written with the STORE compression method.
     pub fn set_store_alignment(&mut self, alignment: u16) {
         self.store_aligment = alignment;

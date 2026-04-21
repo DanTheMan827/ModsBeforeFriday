@@ -817,8 +817,17 @@ name = "mbf-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "byteorder",
+ "const_format",
+ "jsonschema",
+ "log",
+ "mbf-axml",
+ "mbf-zip",
+ "qbsdiff",
  "semver",
  "serde",
+ "serde_json",
+ "xml",
 ]
 
 [[package]]
