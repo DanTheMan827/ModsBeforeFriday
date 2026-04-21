@@ -16,6 +16,16 @@ use self::data::{CentDirHeader, EndOfCentDir, LocalFileHeader};
 mod data;
 pub mod signing;
 
+/// Trait for file handles that additionally support truncation.
+pub trait WriteSeekLen: Read + Write + Seek {
+    fn set_len(&mut self, len: u64) -> std::io::Result<()>;
+}
+impl WriteSeekLen for File {
+    fn set_len(&mut self, len: u64) -> std::io::Result<()> {
+        File::set_len(self, len)
+    }
+}
+
 /// Minimum version needed to extract ZIP files made by this module
 pub const VERSION_NEEDED_TO_EXTRACT: u16 = 0x0002;
 // Max size of the comment
@@ -250,7 +260,7 @@ impl<T: Read + Seek> ZipFile<T> {
 
     /// Copies all entries in this ZIP file into `dst_archive`. For each entry, the path is the same in both archives.
     /// Any files that already exist in `dst_archive` will be overwritten.
-    pub fn copy_all_entries_to(&mut self, dst_archive: &mut ZipFile<File>) -> Result<()> {
+    pub fn copy_all_entries_to<D: WriteSeekLen>(&mut self, dst_archive: &mut ZipFile<D>) -> Result<()> {
         let mut buf_reader = BufReader::new(&mut self.file);
 
         for (src_name, cd_header) in &self.entries {
@@ -273,10 +283,10 @@ impl<T: Read + Seek> ZipFile<T> {
 
     /// Copies the entry in this ZIP file with name `src_name` to `dst_archive` with name `dst_name`.
     /// If the entry already exists, it will be overwritten.
-    pub fn copy_entry(
+    pub fn copy_entry<D: WriteSeekLen>(
         &mut self,
         src_name: &str,
-        dst_archive: &mut ZipFile<File>,
+        dst_archive: &mut ZipFile<D>,
         dst_name: String,
     ) -> Result<()> {
         let (lfh, cd_header, mut buf_reader) = self.read_lfh_and_seek_to_contents(src_name)?;
@@ -284,12 +294,12 @@ impl<T: Read + Seek> ZipFile<T> {
         Self::copy_entry_internal(lfh, cd_header, &mut buf_reader, dst_name, dst_archive)
     }
 
-    fn copy_entry_internal(
+    fn copy_entry_internal<D: WriteSeekLen>(
         mut lfh: LocalFileHeader,
         src_cdh: &CentDirHeader,
         buf_reader: &mut BufReader<&mut T>,
         dst_name: String,
-        dst_archive: &mut ZipFile<File>,
+        dst_archive: &mut ZipFile<D>,
     ) -> Result<()> {
         // Update the new position of the LFH in the CDH
         let mut dst_cdh = src_cdh.clone();
@@ -352,7 +362,7 @@ fn copy_to_with_crc(from: &mut impl Read, to: &mut impl Write) -> Result<u32> {
     }
 }
 
-impl ZipFile<File> {
+impl<T: WriteSeekLen> ZipFile<T> {
     /// Sets the alignment for files written with the STORE compression method.
     pub fn set_store_alignment(&mut self, alignment: u16) {
         self.store_aligment = alignment;

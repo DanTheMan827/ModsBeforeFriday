@@ -4,6 +4,7 @@ resolver = "2"
 members = [ 
     "mbf-adb-killer",
     "mbf-agent",
+    "mbf-core",
     "mbf-res-man",
     "mbf-zip",
     "mbf-axml"

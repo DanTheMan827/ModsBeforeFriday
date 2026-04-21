@@ -7,10 +7,6 @@ use log::{info, warn};
 use crate::{mod_man::ModManager, models::response::Response, parameters::PARAMETERS, patching};
 use anyhow::{anyhow, Context, Result};
 
-/// Handles `GetDowngradedManifest` [Requests](requests::Request).
-///
-/// # Returns
-/// The [Response](requests::Response) to the request (variant `DowngradedManifest`)
 pub(super) fn handle_get_downgraded_manifest(version: String) -> Result<Response> {
     info!("Downloading manifest AXML file");
     let manifest_bytes = mbf_res_man::external_res::get_manifest_axml(
@@ -24,10 +20,6 @@ pub(super) fn handle_get_downgraded_manifest(version: String) -> Result<Response
     Ok(Response::DowngradedManifest { manifest_xml })
 }
 
-/// Handles `Patch` [Requests](requests::Request).
-///
-/// # Returns
-/// The [Response](requests::Response) to the request (variant `Mods`)
 pub(super) fn handle_patch(
     downgrade_to: Option<String>,
     repatch: bool,
@@ -41,9 +33,8 @@ pub(super) fn handle_patch(
         super::mod_status::get_app_info()?.ok_or(anyhow!("Cannot patch when app not installed"))?;
     let res_cache = crate::load_res_cache()?;
 
-    std::fs::create_dir_all(&PARAMETERS.temp)?;
+    crate::hal().create_dir_all(Path::new(&PARAMETERS.temp))?;
 
-    // Either downgrade or just patch the current APK depending on the caller's choice.
     let patching_result = patching::mod_beat_saber(
         Path::new(&PARAMETERS.temp),
         &app_info,
@@ -55,11 +46,10 @@ pub(super) fn handle_patch(
         &res_cache,
     ).context("Modding the game");
 
-    // No matter what, make sure that all temporary files are gone.
-    std::fs::remove_dir_all(&PARAMETERS.temp)?;
+    crate::hal().remove_dir_all(Path::new(&PARAMETERS.temp))?;
     if let Some(splash_path) = vr_splash_path {
-        std::fs::remove_file(splash_path)?;
-    } // TODO add back once I fix the bugs
+        crate::hal().remove_file(Path::new(&splash_path))?;
+    }
 
     let removed_dlc = patching_result?;
     patching::install_modloader().context("Installing external modloader")?;
@@ -72,7 +62,7 @@ pub(super) fn handle_patch(
         mod_manager
             .wipe_all_mods()
             .context("Wiping existing mods")?;
-        mod_manager.load_mods()?; // Should load no mods.
+        mod_manager.load_mods()?;
 
         match super::install_core_mods(
             &res_cache,

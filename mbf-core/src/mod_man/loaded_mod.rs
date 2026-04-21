@@ -133,9 +133,9 @@ impl Mod {
         // Delete all file copies.
         for copy in &self.manifest().file_copies {
             let dest_path = Path::new(&copy.destination);
-            if dest_path.exists() {
+            if crate::hal().path_exists(dest_path) {
                 debug!("Removing file copy at destination {dest_path:?}");
-                std::fs::remove_file(dest_path).context("Deleting copied file")?;
+                crate::hal().remove_file(dest_path).context("Deleting copied file")?;
             }
         }
 
@@ -148,7 +148,7 @@ impl Mod {
 
     /// Deletes the mod, and will not check first whether it needs to be uninstalled.
     pub(super) fn delete_unchecked(self) -> Result<()> {
-        std::fs::remove_dir_all(self.loaded_from).context("Deleting mod extract directory")?;
+        crate::hal().remove_dir_all(&self.loaded_from).context("Deleting mod extract directory")?;
         Ok(())
     } 
 
@@ -158,7 +158,7 @@ impl Mod {
 
         for file_copy in &self.manifest().file_copies {
             let file_path_in_mod = self.loaded_from.join(&file_copy.name);
-            if !file_path_in_mod.exists() {
+            if !crate::hal().path_exists(&file_path_in_mod) {
                 warn!(
                     "Could not install file copy {} as it did not exist in the QMOD",
                     file_copy.name
@@ -168,13 +168,13 @@ impl Mod {
 
             let dest_path = Path::new(&file_copy.destination);
             match dest_path.parent() {
-                Some(parent) => std::fs::create_dir_all(parent)
+                Some(parent) => crate::hal().create_dir_all(parent)
                     .context("Creating destination directory for file copy")?,
                 None => {}
             }
 
-            if Path::new(&file_copy.destination).exists() {
-                std::fs::remove_file(&file_copy.destination)
+            if crate::hal().path_exists(Path::new(&file_copy.destination)) {
+                crate::hal().remove_file(Path::new(&file_copy.destination))
                     .context("Removing existing copied file")?;
             }
 
@@ -182,7 +182,7 @@ impl Mod {
                 "Installing file copy {file_path_in_mod:?} to {}",
                 file_copy.destination
             );
-            std::fs::copy(file_path_in_mod, &file_copy.destination)
+            crate::hal().copy_file(&file_path_in_mod, Path::new(&file_copy.destination))
                 .context("Copying stated file copy to destination")?;
         }
 
@@ -205,7 +205,7 @@ impl Mod {
                     .file_copies
                     .iter()
                     .map(|copy| &copy.destination)
-                    .all(|dest| Path::new(dest).exists()),
+                    .all(|dest| crate::hal().path_exists(Path::new(dest))),
         )
     }
 }
