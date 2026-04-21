@@ -1,2 +1,11 @@
+pub mod data_fix;
+pub mod downgrading;
+pub mod ffi;
+pub mod handlers;
+pub mod host;
+pub mod manifest;
+pub mod mod_man;
 pub mod models;
+pub mod patching;
+pub mod resources;
 pub mod runtime;
