@@ -11,17 +11,14 @@ use rsa::{
     sha2::{Digest, Sha256},
     Pkcs1v15Sign, RsaPrivateKey,
 };
-use std::{
-    fs::File,
-    io::{Cursor, Read, Seek, SeekFrom, Write},
-};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 use super::data::EndOfCentDir;
 
 /// Writes the v2 signature block to the APK.
 /// The `apk` stream should be seeked to the first byte after the contents of the last ZIP entry.
 pub(super) fn write_v2_signature(
-    apk: &mut File,
+    apk: &mut (impl Read + Write + Seek),
     priv_key: &RsaPrivateKey,
     cert: &Certificate,
     central_dir_bytes: &[u8],
@@ -117,7 +114,7 @@ fn calculate_chunked_digest(
 
 // Calculates the digest of an APK, based on the chunked contents of the CD, EOCD and file headers/entries.
 fn calculate_apk_digest(
-    apk: &mut File,
+    apk: &mut (impl Read + Write + Seek),
     entries_data_length: u64,
     central_dir: &[u8],
     eocd: &[u8],
@@ -168,7 +165,7 @@ fn calculate_apk_digest(
 }
 
 fn write_signature_block(
-    apk: &mut File,
+    apk: &mut (impl Read + Write + Seek),
     apk_digest: &[u8],
     cert: &Certificate,
     priv_key: &RsaPrivateKey,

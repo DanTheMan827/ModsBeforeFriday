@@ -6,10 +6,6 @@ use crate::{data_fix, mod_man::ModManager, models::response::Response, parameter
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info, warn};
 
-/// Handles `QuickFix` [Requests](requests::Request).
-///
-/// # Returns
-/// The [Response](requests::Response) to the request (variant `Mods`)
 pub(super) fn handle_quick_fix(
     override_core_mod_url: Option<String>,
     wipe_existing_mods: bool,
@@ -25,9 +21,8 @@ pub(super) fn handle_quick_fix(
             .wipe_all_mods()
             .context("Wiping existing mods")?;
     }
-    mod_manager.load_mods()?; // Should load no mods.
+    mod_manager.load_mods()?;
 
-    // Reinstall missing core mods and overwrite the modloader with the one contained within the executable.
     super::install_core_mods(
         &res_cache,
         &mut mod_manager,
@@ -40,29 +35,25 @@ pub(super) fn handle_quick_fix(
     })
 }
 
-/// Handles `FixPlayerData` [Requests](requests::Request).
-///
-/// # Returns
-/// The [Response](requests::Response) to the request (variant `FixedPlayerData`)
 pub(super) fn handle_fix_player_data() -> Result<Response> {
-    patching::kill_app()?; // Kill app, in case it's still stuck in a hanging state
+    patching::kill_app()?;
 
     let mut did_work = false;
-    if Path::new(&PARAMETERS.datakeeper_player_data).exists() {
+    if crate::hal().path_exists(Path::new(&PARAMETERS.datakeeper_player_data)) {
         info!("Fixing color scheme issues");
         data_fix::fix_colour_schemes(&PARAMETERS.datakeeper_player_data)?;
         did_work = true;
     }
 
-    if Path::new(&PARAMETERS.player_data).exists() {
+    if crate::hal().path_exists(Path::new(&PARAMETERS.player_data)) {
         info!("Backing up player data");
         patching::backup_player_data()?;
 
         info!("Removing (potentially faulty) PlayerData.dat in game files");
         debug!("(removing {})", &PARAMETERS.player_data);
-        std::fs::remove_file(&PARAMETERS.player_data).context("Deleting faulty player data")?;
-        if Path::new(&PARAMETERS.player_data_bak).exists() {
-            std::fs::remove_file(&PARAMETERS.player_data_bak)?;
+        crate::hal().remove_file(Path::new(&PARAMETERS.player_data)).context("Deleting faulty player data")?;
+        if crate::hal().path_exists(Path::new(&PARAMETERS.player_data_bak)) {
+            crate::hal().remove_file(Path::new(&PARAMETERS.player_data_bak))?;
         }
         did_work = true;
     } else {

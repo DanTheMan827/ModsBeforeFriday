@@ -8,7 +8,6 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     ffi::OsString,
-    fs::OpenOptions,
     io::{Cursor, Read, Seek},
     path::{Path, PathBuf},
     rc::Rc,
@@ -97,8 +96,8 @@ impl<'cache> ModManager<'cache> {
         ];
         for path in to_remove {
             let path = Path::new(path);
-            if path.exists() {
-                std::fs::remove_dir_all(path).context("Failed to delete mod folder")?;
+            if crate::hal().path_exists(path) {
+                crate::hal().remove_dir_all(path).context("Failed to delete mod folder")?;
             }
         }
 
@@ -131,14 +130,8 @@ impl<'cache> ModManager<'cache> {
         self.create_mods_dir()?;
         self.mods.clear();
 
-        for stat in std::fs::read_dir(&self.qmods_dir)? {
-            let entry = match stat {
-                Ok(entry) => entry,
-                Err(_) => continue, // Ignore innacessible mods
-            };
-
-            let mod_path = entry.path();
-            if !entry.file_type()?.is_dir() {
+        for mod_path in crate::hal().read_dir_paths(Path::new(&self.qmods_dir))? {
+            if !crate::hal().is_dir(&mod_path) {
                 continue;
             }
 
@@ -158,8 +151,7 @@ impl<'cache> ModManager<'cache> {
                 }
                 Err(err) => {
                     warn!("Failed to load mod from {mod_path:?}: {err}");
-                    // Attempt to delete the invalid mod
-                    match std::fs::remove_dir_all(&mod_path) {
+                    match crate::hal().remove_dir_all(&mod_path) {
                         Ok(_) => info!("Deleted invalid mod"),
                         Err(err) => warn!("Failed to delete invalid mod at {mod_path:?}: {err}"),
                     }
@@ -383,7 +375,7 @@ impl<'cache> ModManager<'cache> {
         );
         let extract_path = self.get_mod_extract_path(&loaded_mod_manifest);
         debug!("Extract path: {extract_path:?}");
-        std::fs::create_dir_all(&extract_path).context("Creating extract directory")?;
+        crate::hal().create_dir_all(&extract_path).context("Creating extract directory")?;
         zip.extract_to_directory(&extract_path)
             .context("Extracting QMOD file")?;
 
@@ -450,45 +442,36 @@ impl<'cache> ModManager<'cache> {
     /// Will do nothing if the old mods directory does not exist.
     /// Returns true if any old QMODs were found
     fn load_old_qmods(&mut self) -> Result<bool> {
-        if !Path::new(&PARAMETERS.old_qmods).exists() {
+        if !crate::hal().path_exists(Path::new(&PARAMETERS.old_qmods)) {
             return Ok(false);
         }
 
         warn!("Migrating mods from legacy folder");
         let mut found_qmod = false;
-        for stat_result in
-            std::fs::read_dir(&PARAMETERS.old_qmods).context("Reading old QMODs directory")?
-        {
-            let stat = stat_result?;
+        for path in crate::hal().read_dir_paths(Path::new(&PARAMETERS.old_qmods)).context("Reading old QMODs directory")? {
+            let mod_stream = crate::hal().open_file_rw(&path).context("Opening legacy mod")?;
+            debug!("Migrating {:?}", path);
 
-            let mod_stream = std::fs::File::open(stat.path()).context("Opening legacy mod")?;
-            debug!("Migrating {:?}", stat.path());
-
-            // Attempt to load a mod from each file
             match self.try_load_new_mod(mod_stream) {
                 Ok(new_mod) => info!("Successfully migrated legacy mod {new_mod}"),
-                Err(err) => warn!("Failed to migrate legacy mod at {:?}: {}", stat.path(), err),
+                Err(err) => warn!("Failed to migrate legacy mod at {:?}: {}", path, err),
             }
 
-            // Delete the file either way
             found_qmod = true;
-            std::fs::remove_file(stat.path()).context("Deleting legacy mod")?;
+            crate::hal().remove_file(&path).context("Deleting legacy mod")?;
         }
-        std::fs::remove_dir(&PARAMETERS.old_qmods)?;
+        crate::hal().remove_dir_all(Path::new(&PARAMETERS.old_qmods))?;
 
         Ok(found_qmod)
     }
 
     fn load_mod_from_directory(&self, from: PathBuf) -> Result<Mod> {
         let manifest_path = from.join("mod.json");
-        if !manifest_path.exists() {
+        if !crate::hal().path_exists(&manifest_path) {
             return Err(anyhow!("Mod at {from:?} had no mod.json manifest"));
         }
 
-        let mut json_data = Vec::new();
-        std::fs::File::open(manifest_path)
-            .context("Opening manifest (mod.json) in mod folder.")?
-            .read_to_end(&mut json_data)
+        let json_data = crate::hal().read_file(&manifest_path)
             .context("Reading manifest")?;
 
         let manifest = self
@@ -728,7 +711,7 @@ impl<'cache> ModManager<'cache> {
             }
 
             let extract_path = Path::new(&self.qmods_dir).join(folder_name);
-            if !extract_path.exists() {
+            if !crate::hal().path_exists(&extract_path) {
                 break extract_path;
             }
 
@@ -739,14 +722,11 @@ impl<'cache> ModManager<'cache> {
     /// Creates the mods, libs and early_mods directories,
     /// and the Packages directory that stores the extracted QMODs for the current game version.
     fn create_mods_dir(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.qmods_dir)?;
-        std::fs::create_dir_all(&PARAMETERS.late_mods)?;
-        std::fs::create_dir_all(&PARAMETERS.early_mods)?;
-        std::fs::create_dir_all(&PARAMETERS.libs)?;
-        OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(&PARAMETERS.moddata_nomedia)
+        crate::hal().create_dir_all(Path::new(&self.qmods_dir))?;
+        crate::hal().create_dir_all(Path::new(&PARAMETERS.late_mods))?;
+        crate::hal().create_dir_all(Path::new(&PARAMETERS.early_mods))?;
+        crate::hal().create_dir_all(Path::new(&PARAMETERS.libs))?;
+        crate::hal().open_file_write(Path::new(&PARAMETERS.moddata_nomedia))
             .context("Creating nomedia file")?;
 
         Ok(())

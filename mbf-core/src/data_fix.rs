@@ -1,16 +1,9 @@
 use anyhow::{anyhow, Context, Result};
-use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Write},
-    path::Path,
-};
+use std::path::Path;
 
-// Fixes issues with player colour schemes from 1.28 loading incorrectly on v1.35.0 or newer.
 pub fn fix_colour_schemes(path: impl AsRef<Path>) -> Result<()> {
-    let mut data_file_buf = Vec::with_capacity(8192);
-    File::open(&path)
-        .context("Opening player data file for reading")?
-        .read_to_end(&mut data_file_buf)?;
+    let data_file_buf = crate::hal().read_file(path.as_ref())
+        .context("Opening player data file for reading")?;
 
     let mut player_data: serde_json::Value =
         serde_json::from_slice(&data_file_buf).context("Parsing PlayerData.dat as JSON")?;
@@ -34,12 +27,7 @@ pub fn fix_colour_schemes(path: impl AsRef<Path>) -> Result<()> {
     let output_str =
         serde_json::to_string(&player_data).context("Converting player data back to JSON")?;
 
-    let mut writer = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(&path)
-        .context("Opening PlayerData.dat for writing.")?;
-    writer.write_all(output_str.as_bytes())?;
+    crate::hal().write_file(path.as_ref(), output_str.as_bytes())?;
 
     Ok(())
 }

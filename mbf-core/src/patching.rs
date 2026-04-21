@@ -1,5 +1,5 @@
 use std::{
-    ffi::OsStr, fs::{File, OpenOptions}, io::{Cursor, Read, Write}, path::{Path, PathBuf}, process::Command
+    ffi::OsStr, io::{Cursor, Read, Seek, Write}, path::{Path, PathBuf}
 };
 
 use crate::{
@@ -12,7 +12,7 @@ use mbf_res_man::{
     external_res,
     res_cache::ResCache,
 };
-use mbf_zip::{signing, FileCompression, ZipFile};
+use mbf_zip::{signing, FileCompression, WriteSeekLen, ZipFile};
 
 const DEBUG_CERT_PEM: &[u8] = include_bytes!("debug_cert.pem");
 const LIB_MAIN: &[u8] = include_bytes!("../libs/libmain.so");
@@ -26,13 +26,8 @@ const LIB_MAIN_PATH: &str = "lib/arm64-v8a/libmain.so";
 const LIB_UNITY_PATH: &str = "lib/arm64-v8a/libunity.so";
 const LIB_OVR_PATH: &str = "lib/arm64-v8a/libovrplatformloader.so";
 
-// Aligment to use for ZIP entries with the STORE compression method, in bytes.
-// 4 is the standard value.
 const STORE_ALIGNMENT: u16 = 4;
 
-// Mods the given app and reinstalls it, optionally applying patches to downgrade the game, if `downgrade_to` is not None.
-// If `manifest_only` is true, patching will only overwrite the manifest and will not add a modloader.
-// If this returns true, reinstalling the game deleted installed DLC, which will need to be redownloaded.
 pub fn mod_beat_saber(
     temp_path: &Path,
     app_info: &AppInfo,
@@ -55,25 +50,20 @@ pub fn mod_beat_saber(
 
     info!("Copying APK to temporary location");
     let temp_apk_path = temp_path.join("mbf-tmp.apk");
-    std::fs::copy(&app_info.path, &temp_apk_path).context("Copying APK to temp")?;
+    crate::hal().copy_file(Path::new(&app_info.path), &temp_apk_path).context("Copying APK to temp")?;
 
-    // Make sure the APK is writable.  Sometimes Android will mark it as read-only and
-    // the resulting copy will inherit those permissions.
-    ensure_can_write_apk(&temp_apk_path).context("Marking APK as writable")?;
+    info!("Marking APK as writable");
+    crate::hal().set_permissions_writable(&temp_apk_path).context("Marking APK as writable")?;
 
     info!("Saving OBB files");
     let obb_backup = temp_path.join("obbs");
-    std::fs::create_dir_all(&obb_backup)?;
+    crate::hal().create_dir_all(&obb_backup)?;
     let mut obb_backups =
         save_obbs(Path::new(&PARAMETERS.obb_dir), &obb_backup,
         downgrade_to.is_none()).context("Saving OBB files")?;
 
-    // Beat Saber DLC asset files do not have the .obb suffix.
-    // If there are any DLC, then these have been deleted by the patching process so we return true so that the user can later be informed of this.
-    // They just need to redownload the relevant DLC - they aren't deleted permanently.
     let contains_dlc = has_file_with_no_extension(&PARAMETERS.obb_dir).context("Checking for DLC")?;
 
-    // Determine a diff sequence and apply it, if we're downgrading
     if let Some(to_version) = downgrade_to.clone() {
         obb_backups = downgrading::get_and_apply_diff_sequence(&app_info.version,
             &to_version,
@@ -93,34 +83,21 @@ pub fn mod_beat_saber(
     )
     .context("Patching and reinstalling APK")?;
 
-    Ok(contains_dlc && downgrade_to.is_some()) // We only delete DLC if we're downgrading.
+    Ok(contains_dlc && downgrade_to.is_some())
 }
 
-fn ensure_can_write_apk(temp_apk_path: &Path) -> Result<()> {
-    let mut permissions = std::fs::metadata(&temp_apk_path).context("Reading temp APK permissions")?.permissions();
-    permissions.set_readonly(false);
-    std::fs::set_permissions(&temp_apk_path, permissions).context("Making temp APK writable")?;
-    Ok(())
-}
-
-// Returns true if the given folder contains any files with no file extension.
 fn has_file_with_no_extension(obb_dir: impl AsRef<Path>) -> Result<bool> {
-    for err_or_stat in std::fs::read_dir(obb_dir)? {
-        if let Ok(stat) = err_or_stat {
-            let path = stat.path();
-
-            if let None = path.extension() {
-                return Ok(true);
-            }
+    for path in crate::hal().read_dir_paths(obb_dir.as_ref())? {
+        if path.extension().is_none() {
+            return Ok(true);
         }
     }
-
     Ok(false)
 }
 
 pub fn kill_app() -> Result<()> {
     info!("Killing Beat Saber");
-    Command::new("am").args(&["force-stop", &PARAMETERS.apk_id]).output()?;
+    crate::hal().exec_command("am", &["force-stop", &PARAMETERS.apk_id])?;
     Ok(())
 }
 
@@ -144,14 +121,14 @@ fn patch_and_reinstall(
     )
     .context("Patching APK")?;
 
-    if Path::new(&PARAMETERS.player_data).exists() {
+    if crate::hal().path_exists(Path::new(&PARAMETERS.player_data)) {
         info!("Backing up player data");
         backup_player_data().context("Backing up player data")?;
     } else {
         info!("No player data to backup");
     }
 
-    if Path::new(&PARAMETERS.datakeeper_player_data).exists() {
+    if crate::hal().path_exists(Path::new(&PARAMETERS.datakeeper_player_data)) {
         info!("Fixing colour schemes in backed up PlayerData.dat");
         match fix_colour_schemes(&PARAMETERS.datakeeper_player_data) {
             Ok(_) => {}
@@ -160,13 +137,10 @@ fn patch_and_reinstall(
     }
 
     reinstall_modded_app(&temp_apk_path).context("Reinstalling modded APK")?;
-    std::fs::remove_file(temp_apk_path)?;
+    crate::hal().remove_file(temp_apk_path)?;
 
     info!("Restoring OBB files");
     restore_obb_files(Path::new(&PARAMETERS.obb_dir), obb_paths).context("Restoring OBB files")?;
-
-    // Player data is not restored back to the `files` directory as we cannot correctly set its permissions so that BS can access it.
-    // (which causes a black screen that can only be fixed by manually deleting the file)
 
     Ok(())
 }
@@ -174,16 +148,16 @@ fn patch_and_reinstall(
 pub fn backup_player_data() -> Result<()> {
     info!("Copying to {}", &PARAMETERS.aux_data_backup);
 
-    std::fs::create_dir_all(Path::new(&PARAMETERS.aux_data_backup).parent().unwrap())?;
-    std::fs::copy(&PARAMETERS.player_data, &PARAMETERS.aux_data_backup)?;
+    crate::hal().create_dir_all(Path::new(&PARAMETERS.aux_data_backup).parent().unwrap())?;
+    crate::hal().copy_file(Path::new(&PARAMETERS.player_data), Path::new(&PARAMETERS.aux_data_backup))?;
 
-    if Path::new(&PARAMETERS.datakeeper_player_data).exists() {
+    if crate::hal().path_exists(Path::new(&PARAMETERS.datakeeper_player_data)) {
         warn!("Did not backup PlayerData.dat to datakeeper folder as there was already a PlayerData.dat there.
             The player data is still safe in {}", &PARAMETERS.aux_data_backup);
     } else {
         info!("Copying to {}", &PARAMETERS.datakeeper_player_data);
-        std::fs::create_dir_all(Path::new(&PARAMETERS.datakeeper_player_data).parent().unwrap())?;
-        std::fs::copy(&PARAMETERS.player_data, &PARAMETERS.datakeeper_player_data)?;
+        crate::hal().create_dir_all(Path::new(&PARAMETERS.datakeeper_player_data).parent().unwrap())?;
+        crate::hal().copy_file(Path::new(&PARAMETERS.player_data), Path::new(&PARAMETERS.datakeeper_player_data))?;
     }
 
     Ok(())
@@ -193,9 +167,7 @@ fn reinstall_modded_app(
     temp_apk_path: &Path
 ) -> Result<()> {
     info!("Reinstalling modded app");
-    Command::new("pm")
-        .args(["uninstall", &PARAMETERS.apk_id])
-        .output()
+    crate::hal().exec_command("pm", &["uninstall", &PARAMETERS.apk_id])
         .context("Uninstalling vanilla APK")?;
 
     let is_pico = get_android_device_manufacturer()
@@ -203,36 +175,25 @@ fn reinstall_modded_app(
         .unwrap_or(false);
 
     if is_pico {
-        Command::new("pm")
-            .args([
-                "install", 
-                "-i", "com.picovr.store", // needed to display game icon in the app launcher
-                &temp_apk_path.to_string_lossy()
-            ])
-            .output()
-            .context("Installing modded APK")?;
+        crate::hal().exec_command("pm", &[
+            "install",
+            "-i", "com.picovr.store",
+            &temp_apk_path.to_string_lossy()
+        ])
+        .context("Installing modded APK")?;
     } else {
-        Command::new("pm")
-            .args(["install", &temp_apk_path.to_string_lossy()])
-            .output()
+        crate::hal().exec_command("pm", &["install", &temp_apk_path.to_string_lossy()])
             .context("Installing modded APK")?;
     }
 
     info!("Granting external storage permission");
-    Command::new("appops")
-        .args(["set", "--uid", &PARAMETERS.apk_id, "MANAGE_EXTERNAL_STORAGE", "allow"])
-        .output()?;
+    crate::hal().exec_command("appops", &["set", "--uid", &PARAMETERS.apk_id, "MANAGE_EXTERNAL_STORAGE", "allow"])?;
 
-    // Android 10 and below needs extra permissions granted for external storage access (Quest 1)
     let sdk_version = get_android_sdk_version()?;
     if sdk_version < 30 {
         info!("Granting WRITE_EXTERNAL_STORAGE and READ_EXTERNAL_STORAGE (Quest 1)");
-        Command::new("pm")
-            .args(["grant", &PARAMETERS.apk_id, "android.permission.WRITE_EXTERNAL_STORAGE"])
-            .output()?;
-        Command::new("pm")
-            .args(["grant", &PARAMETERS.apk_id, "android.permission.READ_EXTERNAL_STORAGE"])
-            .output()?;    
+        crate::hal().exec_command("pm", &["grant", &PARAMETERS.apk_id, "android.permission.WRITE_EXTERNAL_STORAGE"])?;
+        crate::hal().exec_command("pm", &["grant", &PARAMETERS.apk_id, "android.permission.READ_EXTERNAL_STORAGE"])?;
     }
 
     Ok(())
@@ -245,7 +206,7 @@ fn save_libunity(
 ) -> Result<Option<PathBuf>> {
     let url = match external_res::get_libunity_url(res_cache, &PARAMETERS.apk_id, version)? {
         Some(url) => url,
-        None => return Ok(None), // No libunity for this version
+        None => return Ok(None),
     };
 
     let libunity_path = temp_path.as_ref().join("libunity.so");
@@ -255,77 +216,53 @@ fn save_libunity(
     Ok(Some(libunity_path))
 }
 
-// Moves the OBB file to a backup location and returns the path that the OBB needs to be restored to
 fn save_obbs(obb_dir: &Path, obb_backups_path: &Path, include_dlc: bool) -> Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
-    for err_or_stat in std::fs::read_dir(obb_dir)? {
-        if let Ok(stat) = err_or_stat {
-            let path = stat.path();
-            if (include_dlc || path.extension() == Some(OsStr::new("obb"))) && path.is_file() {
-                debug!("Saving OBB path {:?}", path);
-                // Make a backup copy of the obb to restore later after patching.
-                let obb_backup_path = obb_backups_path.join(path.file_name().unwrap());
-                std::fs::copy(&path, &obb_backup_path)?;
-
-                paths.push(obb_backup_path);
-            }
+    for path in crate::hal().read_dir_paths(obb_dir)? {
+        if (include_dlc || path.extension() == Some(OsStr::new("obb"))) && !crate::hal().is_dir(&path) {
+            debug!("Saving OBB path {:?}", path);
+            let obb_backup_path = obb_backups_path.join(path.file_name().unwrap());
+            crate::hal().copy_file(&path, &obb_backup_path)?;
+            paths.push(obb_backup_path);
         }
     }
-
     Ok(paths)
 }
 
-// Copies the contents of `obb_backups` back to `restore_dir`, creating it if it doesn't already exist.
 fn restore_obb_files(restore_dir: &Path, obb_backups: Vec<PathBuf>) -> Result<()> {
-    std::fs::create_dir_all(restore_dir)?;
+    crate::hal().create_dir_all(restore_dir)?;
     for backup_path in obb_backups {
-        // Cannot use a `rename` since the mount points are different
         info!("Restoring {:?}", backup_path);
-        std::fs::copy(
+        crate::hal().copy_file(
             &backup_path,
-            restore_dir.join(backup_path.file_name().unwrap()),
+            &restore_dir.join(backup_path.file_name().unwrap()),
         )?;
-        std::fs::remove_file(backup_path)?;
+        crate::hal().remove_file(&backup_path)?;
     }
-
     Ok(())
 }
 
 pub fn get_modloader_path() -> Result<PathBuf> {
     let modloaders_path = format!("{}/", &PARAMETERS.modloader_dir);
-
-    std::fs::create_dir_all(&modloaders_path)?;
+    crate::hal().create_dir_all(Path::new(&modloaders_path))?;
     Ok(PathBuf::from(modloaders_path).join(MODLOADER_NAME))
 }
 
-// Copies the modloader to the correct directory on the quest
 pub fn install_modloader() -> Result<()> {
     let loader_path = get_modloader_path()?;
     info!("Installing modloader to {loader_path:?}");
-
-    let mut handle = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(loader_path)?;
-    handle.write_all(MODLOADER)?;
+    crate::hal().write_file(&loader_path, MODLOADER)?;
     Ok(())
 }
 
-/// Checks the installed libsl2.so to see if it is present and up to date.
 pub fn get_modloader_status() -> Result<InstallStatus> {
     let loader_path = get_modloader_path()?;
 
     info!("Checking if modloader is up to date");
-    if loader_path.exists() {
-        // Load the existing modloader into memory
-        let mut existing_loader_bytes = Vec::<u8>::new();
-        std::fs::File::open(loader_path)
-            .context("Opening existing modloader (to read) to check if up to date")?
-            .read_to_end(&mut existing_loader_bytes)
-            .context("Reading existing modloader")?;
+    if crate::hal().path_exists(&loader_path) {
+        let existing_loader_bytes = crate::hal().read_file(&loader_path)
+            .context("Reading existing modloader to check if up to date")?;
 
-        // Check if it's all up-to-date
         if existing_loader_bytes == MODLOADER {
             Ok(InstallStatus::Ready)
         } else {
@@ -344,10 +281,7 @@ fn patch_apk_in_place(
     device_pre_v51: bool,
     vr_splash_path: Option<&str>,
 ) -> Result<()> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
+    let file = crate::hal().open_file_rw(path.as_ref())
         .context("Opening temporary APK for writing")?;
 
     let mut zip = ZipFile::open(file).unwrap();
@@ -370,18 +304,17 @@ fn patch_apk_in_place(
             &mut zip,
             ModTag {
                 patcher_name: "ModsBeforeFriday".to_string(),
-                patcher_version: Some("0.1.0".to_string()), // TODO: Get this from the frontend maybe?
-                modloader_name: "Scotland2".to_string(), // TODO: This should really be Libmainloader because SL2 isn't inside the APK
-                modloader_version: None, // Temporary, but this field is universally considered to be optional so this should be OK.
+                patcher_version: Some("0.1.0".to_string()),
+                modloader_name: "Scotland2".to_string(),
+                modloader_version: None,
             },
         )?;
 
         info!("Adding unstripped libunity.so (this may take up to a minute)");
         match libunity_path {
             Some(unity_path) => {
-                let mut unity_stream =
-                    File::open(unity_path).context("Opening unstripped libunity.so")?;
-                zip.write_file(LIB_UNITY_PATH, &mut unity_stream, FileCompression::Deflate)?;
+                let unity_bytes = crate::hal().read_file(&unity_path).context("Opening unstripped libunity.so")?;
+                zip.write_file(LIB_UNITY_PATH, &mut Cursor::new(unity_bytes), FileCompression::Deflate)?;
             }
             None => warn!("No unstripped unity added to the APK! This might cause issues later"),
         }
@@ -389,8 +322,8 @@ fn patch_apk_in_place(
         if device_pre_v51 {
             info!("Replacing ovrplatformloader");
             zip.write_file(
-                LIB_OVR_PATH, 
-                &mut Cursor::new(LEGACY_OVRPLATFORMLOADER), 
+                LIB_OVR_PATH,
+                &mut Cursor::new(LEGACY_OVRPLATFORMLOADER),
                 FileCompression::Deflate
             )?;
         }
@@ -398,12 +331,10 @@ fn patch_apk_in_place(
 
     if let Some(splash_path) = vr_splash_path {
         info!("Applying custom splash screen");
-        let mut vr_splash_file =
-            std::fs::File::open(splash_path).context("Opening vr splash image")?;
-
+        let vr_splash_bytes = crate::hal().read_file(Path::new(splash_path)).context("Opening vr splash image")?;
         zip.write_file(
             "assets/vr_splash.png",
-            &mut vr_splash_file,
+            &mut Cursor::new(vr_splash_bytes),
             FileCompression::Store,
         )?;
     }
@@ -415,7 +346,7 @@ fn patch_apk_in_place(
     Ok(())
 }
 
-fn add_modded_tag(to: &mut ZipFile<File>, tag: ModTag) -> Result<()> {
+fn add_modded_tag<R: WriteSeekLen>(to: &mut ZipFile<R>, tag: ModTag) -> Result<()> {
     let saved_tag = serde_json::to_vec_pretty(&tag)?;
     to.write_file(
         MOD_TAG_PATH,
@@ -425,7 +356,7 @@ fn add_modded_tag(to: &mut ZipFile<File>, tag: ModTag) -> Result<()> {
     Ok(())
 }
 
-pub fn get_modloader_installed(apk: &mut ZipFile<File>) -> Result<Option<ModLoader>> {
+pub fn get_modloader_installed<R: Read + Seek>(apk: &mut ZipFile<R>) -> Result<Option<ModLoader>> {
     if apk.contains_file(MOD_TAG_PATH) {
         let tag_data = apk.read_file(MOD_TAG_PATH).context("Reading mod tag")?;
         let mod_tag: ModTag = match serde_json::from_slice(&tag_data) {
@@ -440,8 +371,6 @@ pub fn get_modloader_installed(apk: &mut ZipFile<File>) -> Result<Option<ModLoad
             if mod_tag.modloader_name.eq_ignore_ascii_case("QuestLoader") {
                 ModLoader::QuestLoader
             } else if mod_tag.modloader_name.eq_ignore_ascii_case("Scotland2") {
-                // TODO: It's a bit problematic that "Scotland2" is the standard for the contents of modded.json
-                // (Since the actual loader inside the APK is libmainloader, which could load any modloader, not just SL2).
                 ModLoader::Scotland2
             } else {
                 ModLoader::Unknown
@@ -454,27 +383,17 @@ pub fn get_modloader_installed(apk: &mut ZipFile<File>) -> Result<Option<ModLoad
     }
 }
 
-/// Checks that there is at least one file with extension .obb in the
-/// `/sdcard/Android/obb/com.beatgames.beatsaber` folder.
-///
-/// MBF only supports BS versions >1.35.0, which all use OBBs so if the obb is not present
-/// the installation is invalid and we need to prompt the user to uninstall it.
 pub fn check_obb_present() -> Result<bool> {
-    if !Path::new(&PARAMETERS.obb_dir).exists() {
+    if !crate::hal().path_exists(Path::new(&PARAMETERS.obb_dir)) {
         return Ok(false);
     }
 
-    // Check if any of the files in the OBB directory have extension OBB
-    Ok(std::fs::read_dir(&PARAMETERS.obb_dir)?.any(|stat_res| {
-        stat_res.is_ok_and(|path| {
-            path.path()
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("obb"))
-        })
+    Ok(crate::hal().read_dir_paths(Path::new(&PARAMETERS.obb_dir))?.iter().any(|path| {
+        path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("obb"))
     }))
 }
 
-fn patch_manifest(zip: &mut ZipFile<File>, additional_properties: String) -> Result<()> {
+fn patch_manifest<R: WriteSeekLen>(zip: &mut ZipFile<R>, additional_properties: String) -> Result<()> {
     let mut xml_reader = xml::EventReader::new(Cursor::new(additional_properties.as_bytes()));
 
     let mut data_output = Cursor::new(Vec::new());
@@ -498,20 +417,18 @@ fn patch_manifest(zip: &mut ZipFile<File>, additional_properties: String) -> Res
 }
 
 fn get_android_sdk_version() -> Result<i32> {
-    let output = Command::new("getprop")
-        .arg("ro.build.version.sdk")
-        .output().context("Getting Android SDK version")?;
+    let output = crate::hal().exec_command("getprop", &["ro.build.version.sdk"])
+        .context("Getting Android SDK version")?;
 
-    let sdk_version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let sdk_version_str = String::from_utf8_lossy(&output).trim().to_string();
     let sdk_version: i32 = sdk_version_str.parse().context("Parsing Android SDK version number")?;
     Ok(sdk_version)
 }
 
 fn get_android_device_manufacturer() -> Result<String> {
-    let output = Command::new("getprop")
-        .arg("ro.product.manufacturer")
-        .output().context("Getting Android device manufacturer")?;
-    
-    let manufacturer = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let output = crate::hal().exec_command("getprop", &["ro.product.manufacturer"])
+        .context("Getting Android device manufacturer")?;
+
+    let manufacturer = String::from_utf8_lossy(&output).trim().to_string();
     Ok(manufacturer)
 }

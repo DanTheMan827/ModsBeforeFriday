@@ -4,7 +4,7 @@
 //! This module also allows more "direct" diffs to be created for faster downgrading, say several versions at once.
 //! A breadth-first-search is used to determine the shortest route (smallest number of diffs) in the database to downgrade one version to another.
 
-use std::{collections::{HashMap, VecDeque}, fs::OpenOptions, io::{BufReader, BufWriter, Read}, path::{Path, PathBuf}};
+use std::{collections::{HashMap, VecDeque}, io::BufWriter, path::{Path, PathBuf}};
 
 use log::info;
 use mbf_res_man::{models::{Diff, VersionDiffs}, res_cache::ResCache};
@@ -110,7 +110,7 @@ fn apply_version_diff(diffs: &VersionDiffs, temp_path: &Path,
     temp_apk_path: &Path, obb_backup_paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     // Download the diff files
     let diffs_path = temp_path.join("diffs");
-    std::fs::create_dir_all(&diffs_path).context("Creating diffs directory")?;
+    crate::hal().create_dir_all(&diffs_path).context("Creating diffs directory")?;
     info!("Downloading diffs");
     download_diffs(&diffs_path, &diffs).context("Downloading diffs")?;
 
@@ -138,14 +138,14 @@ fn apply_version_diff(diffs: &VersionDiffs, temp_path: &Path,
 
         apply_diff(&existing_obb, &dest_obb, obb_diff, &diffs_path)
             .context("Applying diff to OBB")?;
-        std::fs::remove_file(existing_obb).context("Deleting old OBB")?; // Save storage space!
+        crate::hal().remove_file(existing_obb).context("Deleting old OBB")?;
         dest_obb_paths.push(dest_obb);
     }
 
     
 
     // Delete diffs when we're done to avoid using too much storage.
-    std::fs::remove_dir_all(diffs_path)?;
+    crate::hal().remove_dir_all(&diffs_path)?;
 
     Ok(dest_obb_paths)
 }
@@ -170,15 +170,9 @@ fn apply_diff(from_path: &Path, to_path: &Path, diff: &Diff, diffs_path: &Path) 
             Alternatively, if your game is pirated, purchase a legitimate copy of the game.", before_crc, diff.file_crc));
     }
 
-    // Carry out the downgrade
     info!("Applying patch (This step may take a few minutes)");
     let mut output_handle = BufWriter::new(
-        OpenOptions::new()
-            .truncate(true)
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(to_path)?,
+        crate::hal().open_file_write(to_path)?
     );
     patch.apply(&file_content, &mut output_handle)?;
 
@@ -211,13 +205,6 @@ fn download_diff_retry(diff: &Diff, to_dir: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
-// Reads the content of the given file path as a Vec
 fn read_file_vec(path: impl AsRef<Path>) -> Result<Vec<u8>> {
-    let handle = std::fs::File::open(path)?;
-
-    let mut file_content = Vec::with_capacity(handle.metadata()?.len() as usize);
-    let mut reader = BufReader::new(handle);
-    reader.read_to_end(&mut file_content)?;
-
-    Ok(file_content)
+    crate::hal().read_file(path.as_ref())
 }

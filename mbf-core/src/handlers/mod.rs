@@ -1,6 +1,6 @@
-//! Responsible for handling all requests sent to the backend (`mbf-agent`) from the frontend.
+//! Responsible for handling all requests sent to the backend from the frontend.
 
-use std::{io::Cursor, process::Command};
+use std::io::Cursor;
 
 use crate::{
     downloads,
@@ -21,13 +21,6 @@ mod mod_status;
 mod patching;
 mod utility;
 
-/// Handles a [Request] from the MBF frontend.
-///
-/// # Arguments
-/// * `request` - The request to be handled.
-///
-/// # Returns
-/// If successful, a [Response] to be sent back to the frontend.
 pub fn handle_request(request: Request) -> Result<Response> {
     match request.request {
         RequestEnum::GetModStatus {
@@ -65,19 +58,11 @@ pub fn handle_request(request: Request) -> Result<Response> {
     }
 }
 
-/// Gets the version of the currently installed Beat Saber app.
-/// Asks Android for the version of the app using `dumpsys`, rather than parsing the APK as a ZIP and reading its manifest.
-///
-/// # Returns
-/// If successful, an `Ok` variant with the version of the installed Beat Saber app, including the build number suffix.
-/// An `Err` variant is returned on failure, for example if Beat Saber isn't installed or the result from `dumpsys` couldn't be parsed.
 fn get_app_version_only() -> Result<String> {
-    let dumpsys_output = Command::new("dumpsys")
-        .args(["package", &PARAMETERS.apk_id])
-        .output()
+    let stdout = crate::hal().exec_command("dumpsys", &["package", &PARAMETERS.apk_id])
         .context("Invoking dumpsys")?;
     let dumpsys_stdout =
-        String::from_utf8(dumpsys_output.stdout).context("Converting dumpsys output to UTF-8")?;
+        String::from_utf8(stdout).context("Converting dumpsys output to UTF-8")?;
 
     let version_offset = match dumpsys_stdout.find("versionName=") {
         Some(offset) => offset,
@@ -94,17 +79,6 @@ fn get_app_version_only() -> Result<String> {
         .to_string())
 }
 
-/// Ensures that all core mods are installed and up to date.
-///
-/// This includes downloading and installing the latest version of any missing or out-of-date core mods
-/// and enabling any disabled core mods.
-///
-/// # Arguments
-/// * `res_cache` - Resource cache used for fetching the core mods JSON file.
-/// * `mod_manager` - Mod manager containing all currently loaded mods, to check what core mods (and dependencies) need installing.
-/// * `app_info` - Details about the installed Beat Saber app.
-/// * `override_core_mod_url` - If this is a `Some` variant, the function will use this URL to download the core mod JSON, instead of using the default
-/// core mods URL. This can be useful for development purposes.
 fn install_core_mods(
     res_cache: &ResCache,
     mod_manager: &mut ModManager,
@@ -120,7 +94,6 @@ fn install_core_mods(
         .ok_or(anyhow!("No core mods existed for {}", app_info.version))?;
 
     for core_mod in &core_mods.mods {
-        // Check if there is already an existing mod.
         match mod_manager.get_mod(&core_mod.id) {
             Some(existing) => {
                 let existing_ref = existing.borrow();
@@ -142,7 +115,6 @@ fn install_core_mods(
             downloads::download_to_vec_with_attempts(&crate::get_dl_cfg(), &core_mod.download_url)
                 .context("Downloading core mod")?;
         let result = mod_manager.try_load_new_mod(Cursor::new(core_mod_vec));
-        // Delete the temporary file either way
         result?;
     }
 

@@ -21,13 +21,12 @@ pub(super) fn files_exist_in_dir(
 ) -> Result<bool> {
     let dir_path = dir_path.as_ref();
     Ok(file_paths.all(|name| {
-        dir_path
+        crate::hal().path_exists(&dir_path
             .join(
                 name.as_ref()
                     .file_name()
                     .expect("Mod file names should not be blank"),
-            )
-            .exists()
+            ))
     }))
 }
 
@@ -47,7 +46,7 @@ pub(super) fn copy_files_from_mod_folder(
         let file = file.as_ref();
         let file_location = mod_folder.as_ref().join(file);
 
-        if !file_location.exists() {
+        if !crate::hal().path_exists(&file_location) {
             warn!("Could not install file {file:?} as it wasn't found in the QMOD");
             continue;
         }
@@ -59,10 +58,10 @@ pub(super) fn copy_files_from_mod_folder(
 
         debug!("Copying {file_name:?} to {copy_to:?}");
 
-        if copy_to.exists() {
-            std::fs::remove_file(&copy_to).context("Removing existing mod file")?;
+        if crate::hal().path_exists(&copy_to) {
+            crate::hal().remove_file(&copy_to).context("Removing existing mod file")?;
         }
-        std::fs::copy(file_location, copy_to).context("Copying SO for mod")?;
+        crate::hal().copy_file(&file_location, &copy_to).context("Copying SO for mod")?;
     }
 
     Ok(())
@@ -81,9 +80,9 @@ pub(super) fn remove_file_names_from_folder(
     for path in file_paths {
         if let Some(file_name) = path.as_ref().file_name() {
             let stored_path = from.as_ref().join(file_name);
-            if stored_path.exists() {
+            if crate::hal().path_exists(&stored_path) {
                 debug!("Removing {file_name:?}");
-                std::fs::remove_file(stored_path)?;
+                crate::hal().remove_file(&stored_path)?;
             }
         }
     }

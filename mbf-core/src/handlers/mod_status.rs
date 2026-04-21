@@ -1,6 +1,6 @@
 //! Handler for the GetModStatus request.
 
-use std::{fs::File, io::Cursor};
+use std::io::Cursor;
 
 use log::{error, info, warn};
 use mbf_res_man::{
@@ -14,10 +14,6 @@ use crate::{
 use mbf_axml::{self, AxmlReader};
 use anyhow::{Context, Result};
 
-/// Handles `GetModStatus` [Requests](response::Request).
-///
-/// # Returns
-/// The [Response](response::Response) to the request (variant `ModStatus`)
 pub(super) fn handle_get_mod_status(override_core_mod_url: Option<String>) -> Result<Response> {
     crate::try_delete_legacy_dirs();
 
@@ -62,7 +58,7 @@ pub(super) fn get_app_info() -> Result<Option<response::AppInfo>> {
         None => return Ok(None),
     };
 
-    let apk_reader = std::fs::File::open(&apk_path)?;
+    let apk_reader = crate::hal().open_file_read(std::path::Path::new(&apk_path))?;
     let mut apk = ZipFile::open(apk_reader).context("Reading APK as ZIP")?;
 
     let modloader = patching::get_modloader_installed(&mut apk)?;
@@ -78,18 +74,16 @@ pub(super) fn get_app_info() -> Result<Option<response::AppInfo>> {
     }))
 }
 
-fn get_manifest_info_and_xml(apk: &mut ZipFile<File>) -> Result<(ManifestInfo, String)> {
+fn get_manifest_info_and_xml<R: std::io::Read + std::io::Seek>(apk: &mut ZipFile<R>) -> Result<(ManifestInfo, String)> {
     let manifest = apk
         .read_file("AndroidManifest.xml")
         .context("Reading manifest file from APK")?;
 
-    // Decode various important information from the manifest
     let mut manifest_reader = Cursor::new(&manifest);
     let mut axml_reader = AxmlReader::new(&mut manifest_reader)?;
     let manifest_info =
         ManifestInfo::read(&mut axml_reader).context("Parsing manifest from AXML")?;
 
-    // Re-read the manifest as a full XML document.
     let xml_str =
         axml_bytes_to_xml_string(&manifest).context("Converting manifest to readable XML")?;
 
@@ -118,7 +112,6 @@ fn get_core_mods_info(
     res_cache: &ResCache,
     is_patched: bool,
 ) -> Result<Option<CoreModsInfo>> {
-    // Fetch the core mods from the resources repo
     info!("Fetching core mod index");
     let core_mods =
         match mbf_res_man::external_res::fetch_core_mods(res_cache, override_core_mod_url) {
@@ -132,7 +125,6 @@ fn get_core_mods_info(
             Err(res_cache::JsonPullError::ParseError(err)) => return Err(err.into()),
         };
 
-    // Check that all core mods are installed with an appropriate version
     let all_core_mods_installed = match core_mods.get(apk_version) {
         Some(core_mods) => get_core_mods_install_status(&core_mods.mods, mod_manager),
         None => response::InstallStatus::Missing,
@@ -153,12 +145,7 @@ fn get_core_mods_info(
         .collect();
     let is_version_supported = supported_versions.iter().any(|ver| ver == apk_version);
 
-    // If the app is patched and not vanilla, then it's not possible to downgrade it even if a diff is available for the corresponding vanilla APK
-    // Therefore, we can skip fetching the diff index, which will help startup times.
-
     let (downgrade_versions, newer_than_latest_diff) = if is_patched {
-        // While technically newer_than_latest_diff is true, our app is patched already so we couldn't downgrade it
-        // even if there was a diff available.
         (Vec::new(), false)
     } else {
         let diff_index = downgrading::get_all_accessible_versions(res_cache, apk_version)
@@ -179,9 +166,6 @@ fn get_core_mods_info(
     }))
 }
 
-// Attempts to work out if the provided apk_version is newer than the latest version that has diffs to the latest moddable version
-// Essentially, this returns true iff the diff index is outdated, since the APK version given doesn't have the necessary diff to mod the game.
-// This is used by the frontend to explain that they need to wait for a diff to be generated.
 fn is_version_newer_than_latest_diff(apk_version: &str, diffs: &[VersionDiffs]) -> bool {
     let sem_apk_ver = match try_parse_bs_ver_as_semver(apk_version) {
         Some(ver) => ver,
@@ -192,20 +176,17 @@ fn is_version_newer_than_latest_diff(apk_version: &str, diffs: &[VersionDiffs]) 
         }
     };
 
-    // Iterate through the diffs to check if the APK version is at or below their version
     for diff in diffs {
         match try_parse_bs_ver_as_semver(&diff.from_version) {
             Some(diff_version) => {
                 if sem_apk_ver <= diff_version {
-                    return false; // If it is, then this is not an "awaiting diff" situation
+                    return false;
                 }
             }
             None => {}
         }
     }
 
-    // APK version is not equal to or older than ANY of the versions with diffs
-    // Hence, it is newer than the latest diff
     true
 }
 
@@ -217,10 +198,6 @@ fn try_parse_bs_ver_as_semver(version: &str) -> Option<semver::Version> {
     semver::Version::parse(version_segment).ok()
 }
 
-// Checks whether all the core mods in the provided slice are present within the mod manager given.
-// Will give InstallStatus::Ready if all core mods are installed and up to date,
-// InstallStatus::NeedUpdate if any core mods are out of date but all are installed, and InstallStatus::Missing if any
-// of the core mods are not installed or not even present.
 fn get_core_mods_install_status(
     core_mods: &[CoreMod],
     mod_man: &ModManager,
@@ -235,8 +212,6 @@ fn get_core_mods_install_status(
             Some(existing_mod) => {
                 let mod_ref = existing_mod.borrow();
 
-                // NB: We consider a core mod "missing" if it is present but not installed.
-                // Technically it's not "missing" in this case but for the user the difference isn't relevant since MBF auto-downloads mods either way.
                 if !mod_ref.installed() {
                     warn!("Core mod {} was present (ver {}) but is not installed: needs to be installed", core_mod.id, mod_ref.manifest().version);
                     missing_core_mods = true;
@@ -263,7 +238,6 @@ fn get_core_mods_install_status(
     }
 }
 
-/// Marks all of the mods with IDs matching mods in `core_mods` and all of their dependencies as core within the provided ModManager
 pub(super) fn mark_all_core_mods(mod_manager: &ModManager, core_mods: &[CoreMod]) {
     for core_mod in core_mods {
         mod_manager.set_mod_core(&core_mod.id);
