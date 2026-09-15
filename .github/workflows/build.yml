@@ -113,7 +113,9 @@ jobs:
 
       - name: pnpm install 
         if: steps.site_cache.outputs.cache-hit != 'true'
-        run: pnpm install
+        run: |
+          pnpm approve-builds --all
+          pnpm install
 
       - name: pnpm build
         if: steps.site_cache.outputs.cache-hit != 'true'
