@@ -118,7 +118,7 @@ jobs:
       - name: pnpm build
         if: steps.site_cache.outputs.cache-hit != 'true'
         run: |
-          pnpm approve-builds --all
+          pnpm recursive run approve-builds --all
           pnpm recursive run build
 
       - name: pnpm install
