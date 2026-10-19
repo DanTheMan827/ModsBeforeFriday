@@ -5,8 +5,6 @@ packages:
   - mbf-site
 
 allowBuilds:
+  core-js: true
   esbuild: true
   unrs-resolver: true
-
-onlyBuiltDependencies:
-  - core-js@3.49.0
