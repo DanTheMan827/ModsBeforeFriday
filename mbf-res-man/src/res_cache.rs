@@ -20,13 +20,20 @@ pub enum JsonPullError {
     ParseError(serde_json::Error),
 }
 
-impl std::error::Error for JsonPullError {}
+impl std::error::Error for JsonPullError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::FetchError(e) => Some(e.as_ref()),
+            Self::ParseError(e) => Some(e),
+        }
+    }
+}
 
 impl Display for JsonPullError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ParseError(e) => write!(f, "Failed to parse JSON into required type: {e}"),
-            Self::FetchError(e) => write!(f, "Failed to download JSON: {e}"),
+            Self::ParseError(_) => write!(f, "Failed to parse JSON into required type"),
+            Self::FetchError(_) => write!(f, "Failed to download JSON"),
         }
     }
 }
@@ -155,15 +162,17 @@ impl<'agent> ResCache<'agent> {
             }
         }
 
-        let resp = request.call().context("HTTP GET to get file to cache")?;
+        let resp = request.call().with_context(|| {
+            format!(
+                "HTTP GET failed for {url} while caching to {}",
+                cached_path.display()
+            )
+        })?;
+
         match resp.status() {
             304 => {
                 // Cached copy is still valid
                 debug!("Using cached file {cached_file_name} for {url}");
-            }
-            404 => {
-                // No cached copy and file not found at URL
-                return Err(anyhow!("File not found at {url}"));
             }
             200 => {
                 if let Some(etag) = resp.header("ETag") {
@@ -216,10 +225,10 @@ impl<'agent> ResCache<'agent> {
         url: &str,
         cached_file_name: &str,
     ) -> Result<T, JsonPullError> {
-        let json_bytes = match self.get_bytes_cached(url, cached_file_name) {
-            Ok(bytes) => bytes,
-            Err(fetch_err) => return Err(JsonPullError::FetchError(fetch_err)),
-        };
+        let json_bytes = self
+            .get_bytes_cached(url, cached_file_name)
+            .with_context(|| format!("Fetching JSON from {url} into cache file {cached_file_name}"))
+            .map_err(JsonPullError::FetchError)?;
 
         match serde_json::from_slice(&json_bytes) {
             Ok(result) => Ok(result),

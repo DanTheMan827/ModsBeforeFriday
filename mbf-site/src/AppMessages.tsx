@@ -1,5 +1,6 @@
 import { SourceUrl } from "."
-import { isViewingOnWindows, isViewingOnMobile, isViewingOnIos } from "./platformDetection"
+import { isViewingOnWindows, isViewingOnLinux, isViewingOnMobile, isViewingOnIos } from "./platformDetection"
+import { CopyableCommand } from "./components/CopyableCommand"
 
 // I might regret this
 export function AskLaurie() {
@@ -61,11 +62,16 @@ export function OldOsVersion() {
       <p>Some other app is trying to access your Quest, e.g. SideQuest.</p>
       {isViewingOnWindows() ? 
         <>
-          <p>To fix this, close SideQuest if you have it open, press <span className="codeBox">Win + R</span> and type the following text, and finally press enter.</p>
-          <span className="codeBox">taskkill /IM adb.exe /F</span>  
+          <p>To fix this, close SideQuest if you have it open, press <span className="codeBox">Win + R</span>, paste the following command, and press Enter.</p>
+          <CopyableCommand command="taskkill /IM adb.exe /F" />
           <p>Alternatively, restart your computer.</p>
 
           <AskLaurie />
+        </>
+        : isViewingOnLinux() ? <>
+          <p>Close SideQuest and any other apps using your Quest, then open a terminal and run:</p>
+          <CopyableCommand command="pkill -x adb" />
+          <p>Then try connecting again. Alternatively, restart your computer.</p>
         </>
         : <p>To fix this, restart your {isViewingOnMobile() ? "phone" : "computer"}.</p>}
     </>
