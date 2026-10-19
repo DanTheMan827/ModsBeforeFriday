@@ -13,6 +13,7 @@ import AdbWebCredentialStore from "@yume-chan/adb-credential-web";
 import {
   AdbDaemonWebUsbDeviceManager,
   AdbDaemonWebUsbConnection,
+  AdbDaemonWebUsbDevice,
 } from "@yume-chan/adb-daemon-webusb";
 import { installLoggers } from "../Agent";
 
@@ -158,7 +159,7 @@ export function useDeviceConnector(
         connection = await quest.connect();
         installLoggers();
       } catch (err) {
-        if (String(err).includes("The device is already in used")) {
+        if (err instanceof AdbDaemonWebUsbDevice.DeviceBusyError) {
           Log.warn("Full interface error: " + err);
           // Some other ADB daemon is hogging the connection, so we can't get to the Quest.
           return "DeviceInUse";

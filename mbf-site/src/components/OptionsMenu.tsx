@@ -9,7 +9,7 @@ import { Collapsible } from './Collapsible';
 import { ModStatus } from '../Messages';
 import { AndroidManifest } from '../AndroidManifest';
 import { Log } from '../Logging';
-import { Modal } from './Modal';
+import { confirm } from './Modal';
 import { SplashScreenSelector } from './SplashScreenSelector';
 import { gameId } from '../game_info';
 import { useDeviceConnectorContext } from '../hooks/DeviceConnector';
@@ -52,6 +52,8 @@ function ModTools({ quit, modStatus, setModStatus }: {
     setModStatus: (status: ModStatus) => void}) {
     const { chosenDevice } = useDeviceConnectorContext();
     const { useSetError, wrapOperation } = useOperationModalsContext();
+    const chosenDeviceRef = useRef(chosenDevice);
+    chosenDeviceRef.current = chosenDevice;
 
     return (
       <div id="modTools">
@@ -90,12 +92,21 @@ function ModTools({ quit, modStatus, setModStatus }: {
           description="Deletes all installed mods, then installs only the core mods."
           onClick={async () => {
             if (!chosenDevice) return;
+            const device = chosenDevice;
+            if (!(await confirm(
+              "Reinstall only core mods?",
+              <>
+                <p>This will delete all installed mods, then install only the core mods. You will need to reinstall any non-core mods you want to use.</p>
+                <p>Are you sure you want to continue?</p>
+              </>
+            ))) return;
+            if (chosenDeviceRef.current !== device) return;
 
             await wrapOperation(
               "Reinstalling only core mods",
               "Failed to reinstall only core mods",
               async () => {
-                setModStatus(await quickFix(chosenDevice, modStatus, true));
+                setModStatus(await quickFix(device, modStatus, true));
                 toast.success("All non-core mods removed!");
               }
             );
@@ -106,10 +117,19 @@ function ModTools({ quit, modStatus, setModStatus }: {
           description="Uninstalls the game: this will remove all mods and quit MBF."
           onClick={async () => {
             if (!chosenDevice) return;
+            const device = chosenDevice;
+            if (!(await confirm(
+              "Uninstall Beat Saber?",
+              <>
+                <p>This will uninstall Beat Saber, remove all mods, and quit MBF. You will need to reinstall the game from the Meta store.</p>
+                <p>Are you sure you want to continue?</p>
+              </>
+            ))) return;
+            if (chosenDeviceRef.current !== device) return;
 
             const setError = useSetError("Failed to uninstall Beat Saber");
             try {
-              await uninstallBeatSaber(chosenDevice);
+              await uninstallBeatSaber(device);
               quit();
             } catch (e) {
               setError(e);

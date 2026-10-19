@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import './css/App.css';
 import { DeviceModder } from './DeviceModder';
-import { ErrorModal } from './components/Modal';
+import { cancelConfirmations, ConfirmationModal, ErrorModal } from './components/Modal';
 import { Bounce, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { CornerMenu } from './components/CornerMenu';
@@ -38,6 +38,14 @@ function ChooseDevice() {
   const { checkedForBridge, bridge, bridgeClient, adbDevices, bridgeError, scanning, DeviceScanner, BridgeManagerContextProvider, clearDevices } = useBridgeManager();
   const { devicePreV51, deviceInUse, authing, chosenDevice, connecting, connectError, connectDevice, disconnectDevice, DeviceConnectorContextProvider } = useDeviceConnector(bridgeClient);
   const [modderError, setModderError] = useState<string | null>(null);
+  const previousDevice = useRef(chosenDevice);
+
+  useEffect(() => {
+    if (previousDevice.current !== chosenDevice) {
+      cancelConfirmations();
+      previousDevice.current = chosenDevice;
+    }
+  }, [chosenDevice]);
 
   useEffect(() => {
     // If the user is using a bridge and there is only one device, connect to it automatically.
@@ -216,6 +224,7 @@ function App() {
       <AppContents />
       <CornerMenu />
       <OperationModals />
+      <ConfirmationModal />
       <ToastContainer
         position="bottom-right"
         theme="dark"
